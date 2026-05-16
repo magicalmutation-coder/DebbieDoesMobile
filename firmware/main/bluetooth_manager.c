@@ -32,14 +32,27 @@
 
 static const char *TAG = "ble";
 
-/* ── Nordic UART Service UUIDs ─────────────────────────────────────────── */
-/* NUS service:         6E400001-B5A3-F393-E0A9-E50E24DCCA9E */
-/* NUS RX (write):      6E400002-B5A3-F393-E0A9-E50E24DCCA9E */
-/* NUS TX (notify):     6E400003-B5A3-F393-E0A9-E50E24DCCA9E */
-
-#define NUS_SERVICE_UUID  0xABCD   /* abbreviated handles for simplicity */
-#define NUS_RX_CHAR_UUID  0xABCE
-#define NUS_TX_CHAR_UUID  0xABCF
+/* ── Nordic UART Service — official 128-bit UUIDs ──────────────────────── */
+/* These are the registered NUS UUIDs. Standard BLE Serial apps (nRF Toolbox,
+ * Serial Bluetooth Terminal, etc.) look for exactly these UUIDs.
+ * UUID bytes are stored in ESP-IDF little-endian order.
+ *
+ * Service:  6E400001-B5A3-F393-E0A9-E50E24DCCA9E
+ * RX(write):6E400002-B5A3-F393-E0A9-E50E24DCCA9E
+ * TX(notify):6E400003-B5A3-F393-E0A9-E50E24DCCA9E
+ */
+static const uint8_t NUS_SVC_UUID128[16] = {
+    0x9E,0xCA,0xDC,0x24,0xE2,0x50,0xA9,0xE0,
+    0x93,0xF3,0xA3,0xB5,0x01,0x00,0x40,0x6E
+};
+static const uint8_t NUS_RX_UUID128[16] = {
+    0x9E,0xCA,0xDC,0x24,0xE2,0x50,0xA9,0xE0,
+    0x93,0xF3,0xA3,0xB5,0x02,0x00,0x40,0x6E
+};
+static const uint8_t NUS_TX_UUID128[16] = {
+    0x9E,0xCA,0xDC,0x24,0xE2,0x50,0xA9,0xE0,
+    0x93,0xF3,0xA3,0xB5,0x03,0x00,0x40,0x6E
+};
 
 /* Device Information Service */
 #define DIS_SERVICE_UUID  0x180A
@@ -113,7 +126,7 @@ static void process_ble_command(const char *json_str)
     GET_STR("groq_key",      g_debbie_config.groq_api_key);
     GET_STR("or_key",        g_debbie_config.openrouter_api_key);
     GET_STR("local_llm_url", g_debbie_config.local_llm_url);
-    GET_STR("local_llm_mdl", g_debbie_config.local_llm_model);
+    GET_STR("local_llm_model", g_debbie_config.local_llm_model);
 
     /* Agent */
     GET_STR("agent_url",     g_debbie_config.agent_ws_url);
@@ -178,14 +191,14 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
             esp_ble_gap_config_adv_data_raw(adv_data, sizeof(adv_data));
         }
 
-        /* Create Nordic UART Service */
+        /* Create Nordic UART Service with official 128-bit UUID */
         {
             esp_gatt_srvc_id_t svc = {
                 .is_primary = true,
                 .id = { .inst_id = 0,
-                        .uuid = { .len = ESP_UUID_LEN_16,
-                                  .uuid.uuid16 = NUS_SERVICE_UUID } }
+                        .uuid = { .len = ESP_UUID_LEN_128 } }
             };
+            memcpy(svc.id.uuid.uuid.uuid128, NUS_SVC_UUID128, 16);
             esp_ble_gatts_create_service(gatts_if, &svc, GATTS_NUM_HANDLE);
         }
         break;
@@ -194,18 +207,18 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
         uint16_t svc_handle = param->create.service_handle;
         esp_ble_gatts_start_service(svc_handle);
 
-        /* RX characteristic (write without response) */
-        esp_bt_uuid_t rx_uuid = { .len = ESP_UUID_LEN_16,
-                                   .uuid.uuid16 = NUS_RX_CHAR_UUID };
+        /* RX characteristic (write without response) — 128-bit NUS RX UUID */
+        esp_bt_uuid_t rx_uuid = { .len = ESP_UUID_LEN_128 };
+        memcpy(rx_uuid.uuid.uuid128, NUS_RX_UUID128, 16);
         esp_ble_gatts_add_char(svc_handle, &rx_uuid,
                                ESP_GATT_PERM_WRITE,
                                ESP_GATT_CHAR_PROP_BIT_WRITE |
                                ESP_GATT_CHAR_PROP_BIT_WRITE_NR,
                                NULL, NULL);
 
-        /* TX characteristic (notify) */
-        esp_bt_uuid_t tx_uuid = { .len = ESP_UUID_LEN_16,
-                                   .uuid.uuid16 = NUS_TX_CHAR_UUID };
+        /* TX characteristic (notify) — 128-bit NUS TX UUID */
+        esp_bt_uuid_t tx_uuid = { .len = ESP_UUID_LEN_128 };
+        memcpy(tx_uuid.uuid.uuid128, NUS_TX_UUID128, 16);
         esp_ble_gatts_add_char(svc_handle, &tx_uuid,
                                ESP_GATT_PERM_READ,
                                ESP_GATT_CHAR_PROP_BIT_NOTIFY,
@@ -214,9 +227,10 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
     }
 
     case ESP_GATTS_ADD_CHAR_EVT:
-        if (param->add_char.char_uuid.uuid.uuid16 == NUS_TX_CHAR_UUID) {
+        if (param->add_char.char_uuid.len == ESP_UUID_LEN_128 &&
+            memcmp(param->add_char.char_uuid.uuid.uuid128, NUS_TX_UUID128, 16) == 0) {
             s_tx_handle = param->add_char.attr_handle;
-            /* Add CCCD for TX */
+            /* Add CCCD (2902) for TX notifications */
             esp_bt_uuid_t cccd_uuid = { .len = ESP_UUID_LEN_16,
                                          .uuid.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG };
             esp_ble_gatts_add_char_descr(param->add_char.service_handle,
