@@ -121,6 +121,42 @@ static void send_session_update(const char *system_prompt)
     cJSON_AddItemToObject(t_spot, "parameters", t_spot_params);
     cJSON_AddItemToArray(tools, t_spot);
 
+    cJSON *t_mem = cJSON_CreateObject();
+    cJSON_AddStringToObject(t_mem, "type", "function");
+    cJSON_AddStringToObject(t_mem, "name", "save_memory");
+    cJSON_AddStringToObject(t_mem, "description",
+        "Save an important fact or piece of information to long-term memory "
+        "so you can recall it in future conversations. Use when the user shares "
+        "personal details, preferences, or important context (e.g. their name, "
+        "location, interests, schedule, or preferences).");
+    {
+        cJSON *params = cJSON_CreateObject();
+        cJSON *props  = cJSON_CreateObject();
+        cJSON *p_key  = cJSON_CreateObject();
+        cJSON *p_val  = cJSON_CreateObject();
+        cJSON *p_imp  = cJSON_CreateObject();
+        cJSON_AddStringToObject(p_key, "type", "string");
+        cJSON_AddStringToObject(p_key, "description",
+            "Short snake_case identifier for this fact, e.g. user_name, user_location, "
+            "favourite_colour");
+        cJSON_AddStringToObject(p_val, "type", "string");
+        cJSON_AddStringToObject(p_val, "description", "The value to store");
+        cJSON_AddStringToObject(p_imp, "type", "integer");
+        cJSON_AddStringToObject(p_imp, "description",
+            "Importance score 0-10 (10 = critical, 5 = normal)");
+        cJSON_AddItemToObject(props, "key",        p_key);
+        cJSON_AddItemToObject(props, "value",      p_val);
+        cJSON_AddItemToObject(props, "importance", p_imp);
+        cJSON_AddItemToObject(params, "properties", props);
+        cJSON *req_arr = cJSON_CreateArray();
+        cJSON_AddItemToArray(req_arr, cJSON_CreateString("key"));
+        cJSON_AddItemToArray(req_arr, cJSON_CreateString("value"));
+        cJSON_AddItemToObject(params, "required", req_arr);
+        cJSON_AddStringToObject(params, "type", "object");
+        cJSON_AddItemToObject(t_mem, "parameters", params);
+    }
+    cJSON_AddItemToArray(tools, t_mem);
+
     cJSON_AddStringToObject(root,  "type",  "session.update");
     cJSON_AddStringToObject(sess,  "modalities", "audio");
     cJSON_AddStringToObject(sess,  "voice",  "alloy");
@@ -201,13 +237,22 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base,
                 }
             }
         }
-        else if (strcmp(type, "response.audio_transcript.delta") == 0 ||
-                 strcmp(type, "conversation.item.input_audio_transcription.completed") == 0) {
+        else if (strcmp(type, "response.audio_transcript.delta") == 0) {
             cJSON *text_j = cJSON_GetObjectItem(json, "transcript");
             if (!text_j) text_j = cJSON_GetObjectItem(json, "delta");
             if (text_j && cJSON_IsString(text_j)) {
                 oai_event_data_t evt = {
                     .type            = OAI_EVT_TRANSCRIPT,
+                    .transcript.text = text_j->valuestring,
+                };
+                if (s_cb) s_cb(&evt, s_ctx);
+            }
+        }
+        else if (strcmp(type, "conversation.item.input_audio_transcription.completed") == 0) {
+            cJSON *text_j = cJSON_GetObjectItem(json, "transcript");
+            if (text_j && cJSON_IsString(text_j)) {
+                oai_event_data_t evt = {
+                    .type            = OAI_EVT_USER_TRANSCRIPT,
                     .transcript.text = text_j->valuestring,
                 };
                 if (s_cb) s_cb(&evt, s_ctx);

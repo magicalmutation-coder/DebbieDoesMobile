@@ -29,6 +29,7 @@
 #include "network_scanner.h"
 #include "vuln_reporter.h"
 #include "self_agent.h"
+#include "memory_manager.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -112,6 +113,16 @@ static void on_oai_event(const oai_event_data_t *evt, void *ctx)
     case OAI_EVT_TRANSCRIPT:
         ESP_LOGI(TAG, "Transcript: %s", evt->transcript.text);
         display_manager_show_text(evt->transcript.text);
+        /* Record AI turn in memory */
+        memory_manager_add_turn("assistant", evt->transcript.text);
+        memory_manager_sync_turn("assistant", evt->transcript.text);
+        break;
+
+    case OAI_EVT_USER_TRANSCRIPT:
+        ESP_LOGI(TAG, "User said: %s", evt->transcript.text);
+        /* Record user turn in memory */
+        memory_manager_add_turn("user", evt->transcript.text);
+        memory_manager_sync_turn("user", evt->transcript.text);
         break;
 
     case OAI_EVT_FUNCTION_CALL:
@@ -170,6 +181,28 @@ static void on_oai_event(const oai_event_data_t *evt, void *ctx)
             if (args) cJSON_Delete(args);
 
         /* ── Network security & self-agent (all other tools) ── */
+        } else if (strcmp(evt->fn.name, "save_memory") == 0) {
+            /* AI can explicitly save a fact to long-term memory */
+            cJSON *args = cJSON_Parse(evt->fn.args_json);
+            cJSON *key  = args ? cJSON_GetObjectItem(args, "key")   : NULL;
+            cJSON *val  = args ? cJSON_GetObjectItem(args, "value") : NULL;
+            cJSON *imp  = args ? cJSON_GetObjectItem(args, "importance") : NULL;
+            if (key && val && cJSON_IsString(key) && cJSON_IsString(val)) {
+                uint8_t importance = imp ? (uint8_t)imp->valuedouble : 7;
+                memory_manager_save_fact(key->valuestring,
+                                         val->valuestring,
+                                         importance);
+                char result[256];
+                snprintf(result, sizeof(result),
+                         "{\"status\":\"ok\",\"key\":\"%s\",\"value\":\"%s\"}",
+                         key->valuestring, val->valuestring);
+                openai_client_send_function_result(evt->fn.call_id, result);
+            } else {
+                openai_client_send_function_result(evt->fn.call_id,
+                    "{\"error\":\"key and value are required\"}");
+            }
+            if (args) cJSON_Delete(args);
+
         } else {
             /* Defer to the self_agent dispatcher for:
              * network_scan, get_vuln_report, system_info,
@@ -438,6 +471,9 @@ void app_main(void)
     /* 1. NVS + configuration */
     ESP_ERROR_CHECK(storage_init());
 
+    /* 1b. Memory manager — loads persisted facts & recent turns from NVS */
+    memory_manager_init();
+
     /* 2. Display — show boot splash as early as possible */
     ESP_ERROR_CHECK(display_manager_init());
     set_state(DEBBIE_STATE_BOOT);
@@ -509,12 +545,20 @@ void app_main(void)
     /* 10. Battery monitor */
     xTaskCreate(battery_task, "battery", 2048, NULL, 1, NULL);
 
-    /* 11. Connect to AI */
+    /* 11. Connect to AI (inject memory context into system prompt) */
     if (strlen(g_debbie_config.openai_api_key) > 0) {
+        /* Build memory-enriched system prompt */
+        char *enriched_prompt = memory_manager_enrich_prompt(
+            g_debbie_config.system_prompt);
+        const char *prompt_to_use = enriched_prompt
+            ? enriched_prompt : g_debbie_config.system_prompt;
+
         esp_err_t ai_err = openai_client_connect(
             g_debbie_config.openai_api_key,
-            g_debbie_config.system_prompt,
+            prompt_to_use,
             on_oai_event, NULL);
+
+        free(enriched_prompt); /* safe even if NULL */
 
         if (ai_err != ESP_OK) {
             ESP_LOGW(TAG, "Could not connect to OpenAI — check API key");

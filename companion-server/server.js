@@ -26,6 +26,7 @@ const { startEmailMonitor } = require('./email_monitor');
 const { SpotifyController } = require('./spotify');
 const { AgentBridge } = require('./agent_bridge');
 const { addNetworkRoutes, storeScanResults } = require('./network_tools');
+const { addMemoryRoutes } = require('./memory_store');
 
 const app    = express();
 const server = http.createServer(app);
@@ -184,6 +185,9 @@ async function main() {
 
     /* Network security tools */
     addNetworkRoutes(app, broadcast);
+
+    /* Memory & RAG store */
+    addMemoryRoutes(app);
 
     server.listen(PORT, '0.0.0.0', () => {
         console.log(`\n🤖 Debbie Companion Server running on port ${PORT}`);

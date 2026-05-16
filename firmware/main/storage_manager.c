@@ -49,6 +49,9 @@ esp_err_t storage_init(void)
             sizeof(g_debbie_config.local_llm_url) - 1);
     strncpy(g_debbie_config.local_llm_model, LOCAL_LLM_DEFAULT_MODEL,
             sizeof(g_debbie_config.local_llm_model) - 1);
+    g_debbie_config.memory_enabled      = MEMORY_ENABLED_DEFAULT;
+    g_debbie_config.memory_rag_enabled  = MEMORY_RAG_ENABLED_DEFAULT;
+    g_debbie_config.memory_max_turns    = MEMORY_MAX_TURNS_DEFAULT;
     strncpy(g_debbie_config.voice_style, DEFAULT_VOICE_STYLE,
             sizeof(g_debbie_config.voice_style) - 1);
     strncpy(g_debbie_config.response_length, DEFAULT_RESPONSE_LENGTH,
@@ -109,6 +112,13 @@ esp_err_t storage_init(void)
     if (nvs_get_u8(nvs, "bt_en",      &tmp) == ESP_OK)
         g_debbie_config.bluetooth_enabled = (tmp != 0);
 
+    if (nvs_get_u8(nvs, "mem_en",     &tmp) == ESP_OK)
+        g_debbie_config.memory_enabled = (tmp != 0);
+    if (nvs_get_u8(nvs, "mem_rag",    &tmp) == ESP_OK)
+        g_debbie_config.memory_rag_enabled = (tmp != 0);
+    if (nvs_get_u8(nvs, "mem_turns",  &tmp) == ESP_OK)
+        g_debbie_config.memory_max_turns = tmp ? tmp : MEMORY_MAX_TURNS_DEFAULT;
+
     uint16_t vad;
     if (nvs_get_u16(nvs, "vad_thresh", &vad) == ESP_OK)
         g_debbie_config.vad_threshold = vad;
@@ -156,6 +166,9 @@ esp_err_t storage_save_config(void)
     NVS_SET_U8("notif_sp",       g_debbie_config.notif_spotify ? 1 : 0);
     NVS_SET_U8("cam_en",         g_debbie_config.camera_enabled ? 1 : 0);
     NVS_SET_U8("bt_en",          g_debbie_config.bluetooth_enabled ? 1 : 0);
+    NVS_SET_U8("mem_en",         g_debbie_config.memory_enabled ? 1 : 0);
+    NVS_SET_U8("mem_rag",        g_debbie_config.memory_rag_enabled ? 1 : 0);
+    NVS_SET_U8("mem_turns",      g_debbie_config.memory_max_turns);
     nvs_set_u16(nvs, "vad_thresh", g_debbie_config.vad_threshold);
 
     esp_err_t err = nvs_commit(nvs);

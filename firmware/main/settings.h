@@ -125,6 +125,11 @@
 #define DEFAULT_RESPONSE_LENGTH "normal"
 #define DEFAULT_VAD_THRESHOLD   300
 
+/* ── Memory & RAG defaults ──────────────────────────────────────────────── */
+#define MEMORY_ENABLED_DEFAULT      true
+#define MEMORY_RAG_ENABLED_DEFAULT  true
+#define MEMORY_MAX_TURNS_DEFAULT    20
+
 /* ── Spotify (handled by companion server) ──────────────────────────────── */
 /* The device sends commands to the companion server which calls Spotify API */
 

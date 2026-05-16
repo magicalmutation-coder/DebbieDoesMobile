@@ -15,9 +15,10 @@
 typedef enum {
     OAI_EVT_CONNECTED    = 0,
     OAI_EVT_DISCONNECTED,
-    OAI_EVT_AUDIO_DELTA,     /* AI speaking — PCM chunk ready */
-    OAI_EVT_TRANSCRIPT,      /* text transcript available */
-    OAI_EVT_FUNCTION_CALL,   /* function/tool call requested by model */
+    OAI_EVT_AUDIO_DELTA,          /* AI speaking — PCM chunk ready */
+    OAI_EVT_TRANSCRIPT,           /* AI text transcript available */
+    OAI_EVT_USER_TRANSCRIPT,      /* User speech transcript (for memory) */
+    OAI_EVT_FUNCTION_CALL,        /* function/tool call requested by model */
     OAI_EVT_SESSION_CREATED,
     OAI_EVT_ERROR,
 } oai_event_t;

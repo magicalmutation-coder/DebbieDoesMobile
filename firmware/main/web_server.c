@@ -4,6 +4,7 @@
 #include "storage_manager.h"
 #include "wifi_manager.h"
 #include "camera_manager.h"
+#include "memory_manager.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "cJSON.h"
@@ -107,6 +108,7 @@ static const char SETUP_HTML[] =
 "<div class='tab' onclick='showTab(2)'>🎀 Personality</div>"
 "<div class='tab' onclick='showTab(3)'>🔔 Notifications</div>"
 "<div class='tab' onclick='showTab(4)'>⚙️ Advanced</div>"
+"<div class='tab' onclick='showTab(5)'>🧠 Memory</div>"
 "</div>"
 
 /* ── Page 0: Network ───────────────────────────────────────── */
@@ -364,6 +366,52 @@ static const char SETUP_HTML[] =
 "</div>"
 "</div>"
 
+/* ── Page 5: Memory & RAG ────────────────────────────────── */
+"<div class='page' id='p5'>"
+
+"<div class='card'>"
+"<div class='card-title'>🧠 Conversation Memory</div>"
+"<div class='toggle-row'>"
+"<div><div class='toggle-label'>Enable Memory</div>"
+"<div class='toggle-sub'>Remember recent conversations and facts across sessions</div></div>"
+"<label class='switch'><input type='checkbox' id='mem_en' checked>"
+"<span class='slider'></span></label></div><br>"
+"<div class='toggle-row'>"
+"<div><div class='toggle-label'>Companion RAG</div>"
+"<div class='toggle-sub'>Query companion server for richer context retrieval</div></div>"
+"<label class='switch'><input type='checkbox' id='mem_rag' checked>"
+"<span class='slider'></span></label></div><br>"
+"<label>Recent turns to keep in memory (5–50)</label>"
+"<input id='mem_turns' type='number' min='5' max='50' value='20'>"
+"<p class='hint'>Stored in NVS flash; survives reboots. Companion server stores unlimited history.</p>"
+"</div>"
+
+"<div class='card'>"
+"<div class='card-title'>📊 Memory Stats</div>"
+"<div class='status-bar' id='mem_stats'>Loading...</div>"
+"<br><button class='btn' style='background:#c0392b;color:#fff' onclick='clearMem()'>"
+"🗑️ Clear All Memory</button>"
+"</div>"
+
+"<div class='card'>"
+"<div class='card-title'>💡 How Debbie's Memory Works</div>"
+"<p style='font-size:.8rem;color:#999;line-height:1.6'>"
+"<b style='color:#06d6a0'>Short-term:</b> Last 20 turns (user + AI) kept in RAM "
+"and injected into every new conversation as context, so Debbie always knows what "
+"was just discussed.<br><br>"
+"<b style='color:#06d6a0'>Long-term facts:</b> You can say <em>'Remember that my name is Alice'</em> "
+"or <em>'Remember I have a cat named Pixel'</em> and Debbie will save it to NVS flash "
+"— it persists across reboots.<br><br>"
+"<b style='color:#06d6a0'>Companion RAG:</b> When a companion server is configured, "
+"all conversation history is stored there in a searchable SQLite database. When you ask "
+"something, relevant past conversations are retrieved and added to the AI context "
+"— making Debbie smarter over time.<br><br>"
+"<b style='color:#06d6a0'>Voice commands:</b> <em>'Remember that...'</em> / "
+"<em>'What do you know about me?'</em> / <em>'Forget everything'</em>"
+"</p>"
+"</div>"
+"</div>"
+
 /* Sticky save bar */
 "<div class='btn-bar'>"
 "<button class='btn-save' onclick='save()'>💾 Save All Settings</button>"
@@ -397,6 +445,7 @@ static const char SETUP_HTML[] =
 " tabs.forEach(function(t,j){t.className='tab'+(i===j?' active':'');});"
 " pages.forEach(function(p,j){p.className='page'+(i===j?' active':'');});"
 " if(i===4)loadStatus();"
+" if(i===5)loadMemStats();"
 "}"
 
 /* ── Helpers ─── */
@@ -439,7 +488,10 @@ static const char SETUP_HTML[] =
 "  notif_em:gc('notif_em'),notif_sp:gc('notif_sp'),"
 "  volume:parseInt(g('volume'))||75,"
 "  vad_threshold:parseInt(g('vad_thresh'))||300,"
-"  cam_en:gc('cam_en')"
+"  cam_en:gc('cam_en'),"
+"  mem_en:gc('mem_en'),"
+"  mem_rag:gc('mem_rag'),"
+"  mem_turns:parseInt(g('mem_turns'))||20"
 " };"
 " fetch('/configure',{method:'POST',"
 "  headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})"
@@ -508,8 +560,33 @@ static const char SETUP_HTML[] =
 "  if(j.volume!=null)s('volume',j.volume);"
 "  if(j.vad_threshold!=null)s('vad_thresh',j.vad_threshold);"
 "  sc('cam_en',j.cam_en);"
+"  sc('mem_en',j.mem_en);"
+"  sc('mem_rag',j.mem_rag);"
+"  if(j.mem_turns!=null)s('mem_turns',j.mem_turns);"
 " }).catch(function(){});"
 "}"
+
+/* ── Memory stats & clear ─── */
+"function loadMemStats(){"
+" var sb=document.getElementById('mem_stats');"
+" if(sb)sb.innerHTML='Loading...';"
+" fetch('/memory_stats').then(function(r){return r.json();})"
+" .then(function(j){"
+"  if(!sb)return;"
+"  sb.innerHTML="
+"   '<span>💬 Turns: '+j.turn_count+'</span>'"
+"   +'<span>📌 Facts: '+j.fact_count+'</span>'"
+"   +'<span style=\"color:'+(j.companion_rag?'#06d6a0':'#777')+'\">"
+"   🔍 Companion RAG: '+(j.companion_rag?'Active':'Off')+'</span>';"
+" }).catch(function(){if(sb)sb.innerHTML='Stats unavailable';});"
+"}"
+"function clearMem(){"
+" if(!confirm('Clear all Debbie memory? This cannot be undone.'))return;"
+" fetch('/memory_clear',{method:'POST'})"
+" .then(function(){showMsg('ok','Memory cleared!');loadMemStats();})"
+" .catch(function(e){showMsg('err',''+e);});"
+"}"
+
 "loadStatus();"
 "</script></body></html>";
 
@@ -549,6 +626,9 @@ static esp_err_t handler_status(httpd_req_t *req)
     cJSON_AddBoolToObject(json,   "notif_em",     g_debbie_config.notif_email);
     cJSON_AddBoolToObject(json,   "notif_sp",     g_debbie_config.notif_spotify);
     cJSON_AddBoolToObject(json,   "cam_en",       g_debbie_config.camera_enabled);
+    cJSON_AddBoolToObject(json,   "mem_en",       g_debbie_config.memory_enabled);
+    cJSON_AddBoolToObject(json,   "mem_rag",      g_debbie_config.memory_rag_enabled);
+    cJSON_AddNumberToObject(json, "mem_turns",    g_debbie_config.memory_max_turns);
     cJSON_AddStringToObject(json, "state",
         g_debbie_state == DEBBIE_STATE_IDLE      ? "idle"      :
         g_debbie_state == DEBBIE_STATE_LISTENING ? "listening" :
@@ -633,6 +713,15 @@ static esp_err_t handler_configure(httpd_req_t *req)
 
     GET_BOOL("cam_en",       g_debbie_config.camera_enabled);
 
+    /* Memory */
+    GET_BOOL("mem_en",       g_debbie_config.memory_enabled);
+    GET_BOOL("mem_rag",      g_debbie_config.memory_rag_enabled);
+    {
+        cJSON *mt = cJSON_GetObjectItem(json, "mem_turns");
+        if (mt && cJSON_IsNumber(mt) && mt->valuedouble >= 5 && mt->valuedouble <= 50)
+            g_debbie_config.memory_max_turns = (uint8_t)mt->valuedouble;
+    }
+
     cJSON_Delete(json);
     storage_save_config();
 
@@ -674,6 +763,34 @@ static esp_err_t handler_snapshot(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t handler_memory_stats(httpd_req_t *req)
+{
+    int fact_count = 0;
+    memory_manager_get_facts(&fact_count);
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddNumberToObject(json, "turn_count",   memory_manager_turn_count());
+    cJSON_AddNumberToObject(json, "fact_count",   fact_count);
+    cJSON_AddBoolToObject(json,   "memory_enabled", g_debbie_config.memory_enabled);
+    cJSON_AddBoolToObject(json,   "companion_rag",
+        g_debbie_config.memory_rag_enabled &&
+        strlen(g_debbie_config.companion_url) > 0);
+    char *str = cJSON_PrintUnformatted(json);
+    cJSON_Delete(json);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, str, strlen(str));
+    free(str);
+    return ESP_OK;
+}
+
+static esp_err_t handler_memory_clear(httpd_req_t *req)
+{
+    memory_manager_clear();
+    const char *resp = "{\"ok\":true,\"msg\":\"Memory cleared\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, strlen(resp));
+    return ESP_OK;
+}
+
 /* -------------------------------------------------------------------------- */
 
 static httpd_handle_t s_server = NULL;
@@ -681,17 +798,19 @@ static httpd_handle_t s_server = NULL;
 esp_err_t web_server_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 8;
+    cfg.max_uri_handlers = 10;
     cfg.stack_size       = 12288;   /* increased for BLE + WiFi coexistence overhead */
 
     ESP_ERROR_CHECK(httpd_start(&s_server, &cfg));
 
     const httpd_uri_t routes[] = {
-        { .uri = "/",          .method = HTTP_GET,  .handler = handler_root      },
-        { .uri = "/status",    .method = HTTP_GET,  .handler = handler_status    },
-        { .uri = "/configure", .method = HTTP_POST, .handler = handler_configure },
-        { .uri = "/reset",     .method = HTTP_POST, .handler = handler_reset     },
-        { .uri = "/snapshot",  .method = HTTP_GET,  .handler = handler_snapshot  },
+        { .uri = "/",             .method = HTTP_GET,    .handler = handler_root          },
+        { .uri = "/status",       .method = HTTP_GET,    .handler = handler_status        },
+        { .uri = "/configure",    .method = HTTP_POST,   .handler = handler_configure     },
+        { .uri = "/reset",        .method = HTTP_POST,   .handler = handler_reset         },
+        { .uri = "/snapshot",     .method = HTTP_GET,    .handler = handler_snapshot      },
+        { .uri = "/memory_stats", .method = HTTP_GET,    .handler = handler_memory_stats  },
+        { .uri = "/memory_clear", .method = HTTP_POST,   .handler = handler_memory_clear  },
     };
 
     for (int i = 0; i < (int)(sizeof(routes) / sizeof(routes[0])); i++) {

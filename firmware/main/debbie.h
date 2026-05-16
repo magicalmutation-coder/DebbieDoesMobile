@@ -95,6 +95,11 @@ typedef struct {
     bool notif_whatsapp;
     bool notif_email;
     bool notif_spotify;
+
+    /* ── Memory & RAG ─────────────────────────────────────────────────────── */
+    bool    memory_enabled;       /* master on/off for conversation memory */
+    bool    memory_rag_enabled;   /* query companion server for RAG retrieval */
+    uint8_t memory_max_turns;     /* number of recent turns to keep (default 20) */
 } debbie_config_t;
 
 /* Event IDs published on the default event loop */
