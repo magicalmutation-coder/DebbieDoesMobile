@@ -15,16 +15,17 @@
  */
 
 require('dotenv').config();
-const express  = require('express');
-const http     = require('http');
+const express    = require('express');
+const http       = require('http');
 const { WebSocketServer, WebSocket } = require('ws');
-const cors     = require('cors');
+const cors       = require('cors');
+const rateLimit  = require('express-rate-limit');
 
 const { startWhatsApp } = require('./whatsapp');
 const { startEmailMonitor } = require('./email_monitor');
 const { SpotifyController } = require('./spotify');
 const { AgentBridge } = require('./agent_bridge');
-const { addNetworkRoutes } = require('./network_tools');
+const { addNetworkRoutes, storeScanResults } = require('./network_tools');
 
 const app    = express();
 const server = http.createServer(app);
@@ -65,7 +66,11 @@ wss.on('connection', (ws, req) => {
             const msg = JSON.parse(data.toString());
             console.log('[ws] Received:', msg);
 
-            if (msg.type === 'spotify_command') {
+            if (msg.type === 'scan_results') {
+                /* Device sends scan results — store for HTML report generation */
+                storeScanResults(msg.scan || null, msg.vulns || null);
+                console.log('[ws] Stored scan results from device');
+            } else if (msg.type === 'spotify_command') {
                 if (spotify) {
                     const result = await spotify.handleCommand(msg.action);
                     ws.send(JSON.stringify({
@@ -97,22 +102,9 @@ wss.on('connection', (ws, req) => {
     });
 });
 
-/* ── Simple in-process rate limiter ──────────────────────────────────── */
-const _rateLimits = new Map();
-function rateLimitMiddleware(windowMs, maxReqs) {
-    return (req, res, next) => {
-        const key = req.socket.remoteAddress + req.path;
-        const now = Date.now();
-        const entry = _rateLimits.get(key) || { count: 0, resetAt: now + windowMs };
-        if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + windowMs; }
-        entry.count++;
-        _rateLimits.set(key, entry);
-        if (entry.count > maxReqs) {
-            return res.status(429).json({ error: 'Too many requests' });
-        }
-        next();
-    };
-}
+/* ── Rate limiters ────────────────────────────────────────────────────── */
+const notifyLimiter = rateLimit({ windowMs: 60000, max: 30 });
+const spotifyLimiter = rateLimit({ windowMs: 60000, max: 60 });
 
 /* ── REST API ────────────────────────────────────────────────────────── */
 
@@ -127,14 +119,14 @@ app.get('/health', (req, res) => {
 });
 
 /* Send a manual notification to all connected devices */
-app.post('/notify', rateLimitMiddleware(60000, 30), (req, res) => {
+app.post('/notify', notifyLimiter, (req, res) => {
     const { type = 'system', sender = 'Server', preview = '' } = req.body;
     broadcast({ type, sender, preview });
     res.json({ ok: true, sent_to: devices.size });
 });
 
 /* Spotify control via REST */
-app.post('/spotify', rateLimitMiddleware(60000, 60), async (req, res) => {
+app.post('/spotify', spotifyLimiter, async (req, res) => {
     if (!spotify) return res.status(503).json({ error: 'Spotify not configured' });
     const { action } = req.body;
     const result = await spotify.handleCommand(action);

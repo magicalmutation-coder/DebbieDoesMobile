@@ -11,7 +11,8 @@
  */
 
 const SpotifyWebApi = require('spotify-web-api-node');
-const express = require('express');
+const express    = require('express');
+const rateLimit  = require('express-rate-limit');
 
 class SpotifyController {
     constructor() {
@@ -116,19 +117,11 @@ class SpotifyController {
         const router = express.Router();
 
         /* Rate limit: 5 auth attempts per 15 minutes per IP */
-        const authRateLimits = new Map();
-        const authRateLimit = (req, res, next) => {
-            const key = req.socket.remoteAddress || 'unknown';
-            const now = Date.now();
-            const entry = authRateLimits.get(key) || { count: 0, resetAt: now + 900000 };
-            if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + 900000; }
-            entry.count++;
-            authRateLimits.set(key, entry);
-            if (entry.count > 5) {
-                return res.status(429).send('Too many authentication attempts');
-            }
-            next();
-        };
+        const authRateLimit = rateLimit({
+            windowMs:  15 * 60 * 1000,
+            max:       5,
+            message:   'Too many authentication attempts',
+        });
 
         router.get('/auth', authRateLimit, (req, res) => {
             const scopes = [

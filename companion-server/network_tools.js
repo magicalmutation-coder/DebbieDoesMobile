@@ -191,6 +191,17 @@ function cve_lookup(cveId) {
 
 /* ── HTML report generator ───────────────────────────────────────────────── */
 
+/** Escape special HTML characters to prevent XSS in generated reports. */
+function escapeHtml(str) {
+    if (typeof str !== 'string') return String(str);
+    return str
+        .replace(/&/g,  '&amp;')
+        .replace(/</g,  '&lt;')
+        .replace(/>/g,  '&gt;')
+        .replace(/"/g,  '&quot;')
+        .replace(/'/g,  '&#039;');
+}
+
 /**
  * Generate a full HTML vulnerability report from scan + vuln data.
  *
@@ -338,42 +349,27 @@ function generateHtmlReport(scanData, vulnData) {
 </html>`;
 }
 
-/* ── HTML escaping helper ─────────────────────────────────────────────────── */
+/* ── Last scan results stored server-side (avoids accepting raw HTML data from clients) */
+let lastScanData  = null;
+let lastVulnData  = null;
 
-function escapeHtml(str) {
-    if (typeof str !== 'string') return String(str);
-    return str
-        .replace(/&/g,  '&amp;')
-        .replace(/</g,  '&lt;')
-        .replace(/>/g,  '&gt;')
-        .replace(/"/g,  '&quot;')
-        .replace(/'/g,  '&#039;');
-}
-
-/* ── Express routes ───────────────────────────────────────────────────────── */
-
-/* Simple in-memory rate limiter (per-IP, per-route) */
-const rateLimits = new Map();
-function rateLimit(key, windowMs, maxRequests) {
-    const now = Date.now();
-    const entry = rateLimits.get(key) || { count: 0, resetAt: now + windowMs };
-    if (now > entry.resetAt) {
-        entry.count   = 0;
-        entry.resetAt = now + windowMs;
-    }
-    entry.count++;
-    rateLimits.set(key, entry);
-    return entry.count <= maxRequests;
+/**
+ * Store scan results on the server for later report generation.
+ * Called by the device WebSocket handler when scan data arrives.
+ */
+function storeScanResults(scan, vulns) {
+    lastScanData = scan;
+    lastVulnData = vulns;
 }
 
 function addNetworkRoutes(app, broadcast) {
-    /* POST /network/scan — trigger nmap if available, else return basic info */
-    app.post('/network/scan', async (req, res) => {
-        const ip  = req.socket.remoteAddress || 'unknown';
-        if (!rateLimit(`scan:${ip}`, 60000, 3)) {
-            return res.status(429).json({ error: 'Rate limit exceeded — max 3 scans/minute' });
-        }
+    /* Rate limiter for scan endpoint */
+    const scanLimiter = rateLimit({ windowMs: 60000, max: 3 });
+    const cveLimiter  = rateLimit({ windowMs: 30000, max: 5 });
 
+    /* POST /network/scan — trigger nmap if available */
+    app.post('/network/scan', scanLimiter, async (req, res) => {
+        const ip = req.socket.remoteAddress || 'unknown';
         const { target = '192.168.1.0/24', flags = [] } = req.body;
 
         /*
@@ -396,12 +392,13 @@ function addNetworkRoutes(app, broadcast) {
 
         /* Only allow safe nmap flags */
         const ALLOWED_FLAGS = new Set(['-sV', '-O', '-sn', '-p', '--open', '-T3', '-T4', '-A']);
-        if (!Array.isArray(flags) || flags.some(f => !ALLOWED_FLAGS.has(f) && !/^-p[\s\d,\-]+$/.test(f))) {
+        if (!Array.isArray(flags) || flags.some(f => !ALLOWED_FLAGS.has(f) && !/^-p[\s\d,-]+$/.test(f))) {
             return res.status(400).json({ error: 'Invalid nmap flags' });
         }
 
         try {
             const results = await nmapScan(target, flags);
+            storeScanResults(results, null);
             broadcast({
                 type:    'agent',
                 sender:  'Network Scanner',
@@ -414,12 +411,7 @@ function addNetworkRoutes(app, broadcast) {
     });
 
     /* GET /network/cve/:id */
-    app.get('/network/cve/:id', async (req, res) => {
-        const ip  = req.socket.remoteAddress || 'unknown';
-        if (!rateLimit(`cve:${ip}`, 30000, 5)) {
-            return res.status(429).json({ error: 'Rate limit exceeded — NVD allows 5 req/30s without API key' });
-        }
-
+    app.get('/network/cve/:id', cveLimiter, async (req, res) => {
         const cveId = req.params.id;
         /* Enforce valid CVE format: year 1999–current+1, 4+ digit sequence */
         if (!/^CVE-(199[9]|2[0-9]{3})-\d{4,}$/i.test(cveId)) {
@@ -433,18 +425,27 @@ function addNetworkRoutes(app, broadcast) {
         }
     });
 
-    /* POST /network/report — generate HTML report from structured scan data */
-    app.post('/network/report', (req, res) => {
+    /* POST /network/results — store scan results from device */
+    app.post('/network/results', (req, res) => {
         const { scan, vulns } = req.body;
         if (!scan) return res.status(400).json({ error: 'scan data required' });
-        /* Data is passed as structured JSON, not user-typed HTML — safe to render */
-        const html = generateHtmlReport(scan, vulns || {});
+        storeScanResults(scan, vulns || null);
+        res.json({ ok: true });
+    });
+
+    /* GET /network/report — generate HTML report from last stored scan results */
+    app.get('/network/report', (req, res) => {
+        if (!lastScanData) {
+            return res.status(404).json({ error: 'No scan results available. Run a scan first.' });
+        }
+        const html = generateHtmlReport(lastScanData, lastVulnData || {});
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('X-Frame-Options', 'DENY');
         res.send(html);
     });
 
-    console.log('[network] Routes registered: /network/scan, /network/cve/:id, /network/report');
+    console.log('[network] Routes registered: /network/scan, /network/cve/:id, /network/results, /network/report');
 }
 
-module.exports = { nmapScan, cve_lookup, generateHtmlReport, addNetworkRoutes };
+module.exports = { nmapScan, cve_lookup, generateHtmlReport, addNetworkRoutes, storeScanResults };
