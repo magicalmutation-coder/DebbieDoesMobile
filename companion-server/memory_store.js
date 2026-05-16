@@ -246,7 +246,15 @@ function clearAll() {
 
 /* ── Express route handler ───────────────────────────────────────────────── */
 
-const memLimiter = rateLimit({ windowMs: 60000, max: 120 });
+const memLimiter = rateLimit({
+    windowMs: 60000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => {
+        res.status(429).json({ error: 'Too many memory requests, please slow down.' });
+    },
+});
 
 function addMemoryRoutes(app) {
     /* Lazy-initialise the DB */
