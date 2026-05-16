@@ -1,0 +1,21 @@
+# ESP-IDF build artefacts
+firmware/build/
+firmware/sdkconfig
+firmware/dependencies.lock
+firmware/managed_components/
+
+# Node.js
+companion-server/node_modules/
+companion-server/.env
+companion-server/.wwebjs_auth/
+companion-server/.wwebjs_cache/
+companion-server/debbie_memory.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+*.swp
+*.swo

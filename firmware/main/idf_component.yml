@@ -1,0 +1,32 @@
+## IDF Component Manager manifest
+## https://docs.espressif.com/projects/idf-component-manager/
+
+dependencies:
+  idf: ">=5.2.0"
+
+  ## WebSocket client (for OpenAI Realtime API + companion server)
+  espressif/esp_websocket_client:
+    version: ">=1.1.0"
+
+  ## LVGL v8 display library
+  lvgl/lvgl:
+    version: "~8.3.0"
+
+  ## LCD panel drivers (ST7789 / ST7796)
+  espressif/esp_lcd_st7789:
+    version: ">=1.0.0"
+
+  espressif/esp_lcd_st7796:
+    version: ">=1.0.0"
+
+  ## ESP camera component
+  espressif/esp_camera:
+    version: ">=2.0.0"
+
+  ## JSON library
+  espressif/cjson:
+    version: ">=1.7.14"
+
+  ## HTTP client
+  idf_component_manager/idf_component_manager:
+    version: ">=2.0.0"
