@@ -1,0 +1,32 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "storage_manager.c"
+        "wifi_manager.c"
+        "audio_manager.c"
+        "camera_manager.c"
+        "display_manager.c"
+        "openai_client.c"
+        "notification_client.c"
+        "web_server.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        nvs_flash
+        esp_wifi
+        esp_event
+        esp_netif
+        esp_http_client
+        esp_https_ota
+        esp_websocket_client
+        esp_http_server
+        esp_camera
+        esp_lcd
+        driver
+        lvgl
+        cJSON
+        mbedtls
+        esp_timer
+        freertos
+        log
+)
