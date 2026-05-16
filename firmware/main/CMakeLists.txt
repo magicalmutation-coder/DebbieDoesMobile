@@ -3,6 +3,7 @@ idf_component_register(
         "main.c"
         "storage_manager.c"
         "wifi_manager.c"
+        "bluetooth_manager.c"
         "audio_manager.c"
         "camera_manager.c"
         "display_manager.c"
@@ -34,4 +35,5 @@ idf_component_register(
         log
         lwip
         ping
+        bt
 )

@@ -1,4 +1,5 @@
 #pragma once
+#include "debbie.h"  /* for LLM_PROVIDER_* defines */
 
 /* =============================================================================
  * Debbie — Portable Personal AI Friend
@@ -97,6 +98,10 @@
 #define DEBBIE_AP_PASSWORD  ""    /* open network for first-run setup */
 #define DEBBIE_AP_IP        "192.168.4.1"
 
+/* ── Bluetooth defaults ─────────────────────────────────────────────────── */
+#define DEBBIE_BLE_DEVICE_NAME  "Debbie"
+#define DEBBIE_BLE_DEFAULT_ON   true
+
 /* ── OpenAI ─────────────────────────────────────────────────────────────── */
 #define OPENAI_REALTIME_HOST   "api.openai.com"
 #define OPENAI_REALTIME_PATH   "/v1/realtime?model=gpt-4o-realtime-preview"
@@ -104,8 +109,21 @@
 #define OPENAI_CHAT_PATH       "/v1/chat/completions"
 #define OPENAI_VISION_MODEL    "gpt-4o"
 
+/* ── Local LLM defaults (Ollama / LM Studio) ───────────────────────────── */
+#define LOCAL_LLM_DEFAULT_URL   "http://192.168.1.100:11434"
+#define LOCAL_LLM_DEFAULT_MODEL "llama3"
+
 /* ── Agent / companion server defaults ──────────────────────────────────── */
 #define AGENT_WS_DEFAULT_URL   "ws://YOUR_COMPANION_SERVER:3001"
+
+/* ── LLM provider & model defaults ─────────────────────────────────────── */
+#define DEFAULT_LLM_PROVIDER    LLM_PROVIDER_OPENAI
+#define DEFAULT_LLM_MODEL       "gpt-4o"
+
+/* ── Personality defaults ────────────────────────────────────────────────── */
+#define DEFAULT_VOICE_STYLE     "friendly"
+#define DEFAULT_RESPONSE_LENGTH "normal"
+#define DEFAULT_VAD_THRESHOLD   300
 
 /* ── Spotify (handled by companion server) ──────────────────────────────── */
 /* The device sends commands to the companion server which calls Spotify API */

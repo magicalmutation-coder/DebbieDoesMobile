@@ -63,6 +63,34 @@ static void event_handler(void *arg, esp_event_base_t base,
 
 /* -------------------------------------------------------------------------- */
 
+/**
+ * @brief  Try connecting to a single SSID/password combination.
+ *         Returns ESP_OK if connected within timeout, ESP_FAIL otherwise.
+ */
+static esp_err_t try_connect(const char *ssid, const char *password)
+{
+    if (!ssid || strlen(ssid) == 0) return ESP_FAIL;
+
+    ESP_LOGI(TAG, "Trying WiFi network: %s", ssid);
+    xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
+    s_retry_count = 0;
+
+    wifi_config_t sta_config = { 0 };
+    strncpy((char *)sta_config.sta.ssid,     ssid,     sizeof(sta_config.sta.ssid) - 1);
+    strncpy((char *)sta_config.sta.password, password, sizeof(sta_config.sta.password) - 1);
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_config));
+    esp_wifi_disconnect();
+    esp_wifi_connect();
+
+    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
+                                           WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+                                           pdFALSE, pdFALSE,
+                                           pdMS_TO_TICKS(10000));
+    return (bits & WIFI_CONNECTED_BIT) ? ESP_OK : ESP_FAIL;
+}
+
+/* -------------------------------------------------------------------------- */
+
 esp_err_t wifi_manager_init(void)
 {
     s_wifi_event_group = xEventGroupCreate();
@@ -80,7 +108,7 @@ esp_err_t wifi_manager_init(void)
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         IP_EVENT, IP_EVENT_STA_GOT_IP, event_handler, NULL, NULL));
 
-    /* AP config — always on for setup */
+    /* AP config — always on so the config portal is reachable */
     wifi_config_t ap_config = {
         .ap = {
             .ssid            = DEBBIE_AP_SSID,
@@ -91,34 +119,42 @@ esp_err_t wifi_manager_init(void)
         },
     };
 
-    if (strlen(g_debbie_config.wifi_ssid) > 0) {
-        /* Try STA + AP together */
+    /* Check if any network is configured */
+    bool has_network = (strlen(g_debbie_config.wifi_ssid)  > 0 ||
+                        strlen(g_debbie_config.wifi_ssid2) > 0 ||
+                        strlen(g_debbie_config.wifi_ssid3) > 0);
+
+    if (has_network) {
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-        wifi_config_t sta_config = { 0 };
-        strncpy((char *)sta_config.sta.ssid,     g_debbie_config.wifi_ssid,
-                sizeof(sta_config.sta.ssid) - 1);
-        strncpy((char *)sta_config.sta.password, g_debbie_config.wifi_password,
-                sizeof(sta_config.sta.password) - 1);
-        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_config));
-        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP,  &ap_config));
+        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
         ESP_ERROR_CHECK(esp_wifi_start());
 
-        /* Wait up to 10 s for connection */
-        EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
-                                               WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-                                               pdFALSE, pdFALSE,
-                                               pdMS_TO_TICKS(10000));
-        if (bits & WIFI_CONNECTED_BIT) {
-            ESP_LOGI(TAG, "Connected to WiFi: %s", g_debbie_config.wifi_ssid);
-            return ESP_OK;
+        /* Try each saved network in priority order */
+        const char *ssids[3] = {
+            g_debbie_config.wifi_ssid,
+            g_debbie_config.wifi_ssid2,
+            g_debbie_config.wifi_ssid3,
+        };
+        const char *passwords[3] = {
+            g_debbie_config.wifi_password,
+            g_debbie_config.wifi_password2,
+            g_debbie_config.wifi_password3,
+        };
+
+        for (int i = 0; i < 3; i++) {
+            if (try_connect(ssids[i], passwords[i]) == ESP_OK) {
+                ESP_LOGI(TAG, "Connected to WiFi: %s", ssids[i]);
+                return ESP_OK;
+            }
         }
-        ESP_LOGW(TAG, "Could not connect to saved WiFi — entering setup mode");
+
+        ESP_LOGW(TAG, "All saved networks failed — staying in AP+STA mode");
     } else {
         /* AP-only setup mode */
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
         ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
         ESP_ERROR_CHECK(esp_wifi_start());
-        ESP_LOGI(TAG, "AP-only mode — connect to '%s' and visit %s",
+        ESP_LOGI(TAG, "AP-only mode — connect to '%s' and visit http://%s/",
                  DEBBIE_AP_SSID, DEBBIE_AP_IP);
     }
     return ESP_FAIL;
@@ -128,15 +164,22 @@ bool wifi_manager_is_connected(void) { return s_connected; }
 
 esp_err_t wifi_manager_reconnect(void)
 {
-    s_retry_count = 0;
-    xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
-    esp_wifi_disconnect();
-    esp_wifi_connect();
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
-                                           WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-                                           pdFALSE, pdFALSE,
-                                           pdMS_TO_TICKS(15000));
-    return (bits & WIFI_CONNECTED_BIT) ? ESP_OK : ESP_FAIL;
+    const char *ssids[3] = {
+        g_debbie_config.wifi_ssid,
+        g_debbie_config.wifi_ssid2,
+        g_debbie_config.wifi_ssid3,
+    };
+    const char *passwords[3] = {
+        g_debbie_config.wifi_password,
+        g_debbie_config.wifi_password2,
+        g_debbie_config.wifi_password3,
+    };
+
+    for (int i = 0; i < 3; i++) {
+        if (try_connect(ssids[i], passwords[i]) == ESP_OK)
+            return ESP_OK;
+    }
+    return ESP_FAIL;
 }
 
 esp_err_t wifi_manager_set_credentials(const char *ssid, const char *password)
@@ -146,3 +189,4 @@ esp_err_t wifi_manager_set_credentials(const char *ssid, const char *password)
     storage_save_config();
     return wifi_manager_reconnect();
 }
+

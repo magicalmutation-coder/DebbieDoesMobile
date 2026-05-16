@@ -40,20 +40,61 @@ typedef struct {
     bool         read;
 } debbie_notification_t;
 
+/* LLM provider identifiers */
+#define LLM_PROVIDER_OPENAI     "openai"
+#define LLM_PROVIDER_OLLAMA     "ollama"
+#define LLM_PROVIDER_ANTHROPIC  "anthropic"
+#define LLM_PROVIDER_GROQ       "groq"
+#define LLM_PROVIDER_OPENROUTER "openrouter"
+
 /* Debbie configuration stored in NVS */
 typedef struct {
+    /* ── Network: WiFi (up to 3 saved networks) ───────────────────────────── */
     char wifi_ssid[64];
     char wifi_password[64];
+    char wifi_ssid2[64];
+    char wifi_password2[64];
+    char wifi_ssid3[64];
+    char wifi_password3[64];
+
+    /* ── Network: Bluetooth ────────────────────────────────────────────────── */
+    bool bluetooth_enabled;
+    char ble_device_name[32];    /* advertised BLE name, default = debbie_name */
+
+    /* ── AI: provider & model ─────────────────────────────────────────────── */
+    char llm_provider[32];       /* "openai" | "ollama" | "anthropic" | "groq" | "openrouter" */
+    char llm_model[64];          /* e.g. "gpt-4o", "llama3", "claude-3-5-sonnet-20241022" */
     char openai_api_key[128];
-    char agent_ws_url[256];      /* custom agent endpoint */
-    char spotify_token[512];     /* Spotify OAuth token (via companion) */
+    char anthropic_api_key[128];
+    char groq_api_key[128];
+    char openrouter_api_key[128];
+    char local_llm_url[256];     /* Ollama / LM Studio base URL e.g. http://192.168.1.5:11434 */
+    char local_llm_model[64];    /* model name on local server */
+
+    /* ── AI: agent / companion ────────────────────────────────────────────── */
+    char agent_ws_url[256];      /* custom agent WebSocket endpoint */
     char companion_url[256];     /* companion server base URL */
+    bool use_custom_agent;       /* use agent endpoint instead of direct LLM */
+
+    /* ── Services: Spotify ────────────────────────────────────────────────── */
+    char spotify_token[512];     /* Spotify OAuth token (via companion) */
+
+    /* ── Personality ──────────────────────────────────────────────────────── */
     char debbie_name[32];        /* customisable name, default "Debbie" */
     char system_prompt[512];     /* custom persona prompt */
-    bool use_custom_agent;       /* use agent endpoint instead of OpenAI */
+    char voice_style[16];        /* "friendly" | "professional" | "playful" */
+    char response_length[16];    /* "brief" | "normal" | "detailed" */
+
+    /* ── Audio / UI ───────────────────────────────────────────────────────── */
     uint8_t speaker_volume;      /* 0–100 */
-    bool notifications_enabled;
+    uint16_t vad_threshold;      /* voice activity detection threshold, default 300 */
     bool camera_enabled;
+
+    /* ── Notifications ────────────────────────────────────────────────────── */
+    bool notifications_enabled;
+    bool notif_whatsapp;
+    bool notif_email;
+    bool notif_spotify;
 } debbie_config_t;
 
 /* Event IDs published on the default event loop */

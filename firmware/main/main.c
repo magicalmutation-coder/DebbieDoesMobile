@@ -19,6 +19,7 @@
 #include "settings.h"
 #include "storage_manager.h"
 #include "wifi_manager.h"
+#include "bluetooth_manager.h"
 #include "audio_manager.h"
 #include "camera_manager.h"
 #include "display_manager.h"
@@ -465,10 +466,13 @@ void app_main(void)
 
     esp_err_t wifi_err = wifi_manager_init();
 
-    /* 7. Always start the web server (for setup and status) */
+    /* 7. Bluetooth (BLE) — start alongside WiFi */
+    bluetooth_manager_init();  /* silently skips if bt disabled in config */
+
+    /* 8. Always start the web server (for setup and status) */
     ESP_ERROR_CHECK(web_server_start());
 
-    /* 8. Network scanner — init after WiFi (even before connecting) */
+    /* 9. Network scanner — init after WiFi (even before connecting) */
     ESP_ERROR_CHECK(net_scanner_init());
 
     if (wifi_err != ESP_OK) {
