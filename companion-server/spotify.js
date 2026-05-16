@@ -115,7 +115,22 @@ class SpotifyController {
     getRouter() {
         const router = express.Router();
 
-        router.get('/auth', (req, res) => {
+        /* Rate limit: 5 auth attempts per 15 minutes per IP */
+        const authRateLimits = new Map();
+        const authRateLimit = (req, res, next) => {
+            const key = req.socket.remoteAddress || 'unknown';
+            const now = Date.now();
+            const entry = authRateLimits.get(key) || { count: 0, resetAt: now + 900000 };
+            if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + 900000; }
+            entry.count++;
+            authRateLimits.set(key, entry);
+            if (entry.count > 5) {
+                return res.status(429).send('Too many authentication attempts');
+            }
+            next();
+        };
+
+        router.get('/auth', authRateLimit, (req, res) => {
             const scopes = [
                 'user-read-playback-state',
                 'user-modify-playback-state',
@@ -127,7 +142,7 @@ class SpotifyController {
             res.redirect(url);
         });
 
-        router.get('/callback', async (req, res) => {
+        router.get('/callback', authRateLimit, async (req, res) => {
             const { code } = req.query;
             try {
                 const data = await this.api.authorizationCodeGrant(code);
@@ -137,10 +152,12 @@ class SpotifyController {
                 console.log('[spotify] ✅ Authorised!');
                 console.log('[spotify] Add this to your .env:');
                 console.log(`SPOTIFY_REFRESH_TOKEN=${this._refreshToken}`);
-                res.send('<h1>✅ Spotify linked to Debbie!</h1><p>You can close this window.</p>');
+                res.setHeader('Content-Security-Policy', "default-src 'none'");
+                res.send('<h1>Spotify linked to Debbie!</h1><p>You can close this window.</p>');
             } catch (e) {
                 console.error('[spotify] Auth error:', e.message);
-                res.status(500).send('Auth failed: ' + e.message);
+                /* Return generic error to avoid reflecting exception details into HTML */
+                res.status(500).send('Authentication failed. Please try again.');
             }
         });
 

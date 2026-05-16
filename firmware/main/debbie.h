@@ -6,6 +6,9 @@
 
 /* ── Debbie shared types ─────────────────────────────────────────────────── */
 
+/* Firmware version */
+#define DEBBIE_FW_VERSION  "1.0.0"
+
 typedef enum {
     DEBBIE_STATE_BOOT = 0,
     DEBBIE_STATE_SETUP,         /* captive-portal config */
@@ -17,6 +20,7 @@ typedef enum {
     DEBBIE_STATE_CAMERA,        /* camera preview / capture */
     DEBBIE_STATE_NOTIFICATION,  /* showing incoming notification */
     DEBBIE_STATE_SPOTIFY,       /* music playback control */
+    DEBBIE_STATE_SCANNING,      /* network security scan in progress */
     DEBBIE_STATE_ERROR,
 } debbie_state_t;
 

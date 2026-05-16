@@ -26,10 +26,7 @@ esp_err_t storage_init(void)
     memset(&g_debbie_config, 0, sizeof(g_debbie_config));
     strncpy(g_debbie_config.debbie_name, "Debbie", sizeof(g_debbie_config.debbie_name) - 1);
     strncpy(g_debbie_config.system_prompt,
-            "You are Debbie, a warm, helpful, and friendly personal AI companion. "
-            "You are running on a small portable device and love to help with daily tasks, "
-            "chat, answer questions, read notifications, and more. Keep responses concise "
-            "and conversational unless the user asks for detail.",
+            DEBBIE_DEFAULT_SYSTEM_PROMPT,
             sizeof(g_debbie_config.system_prompt) - 1);
     g_debbie_config.speaker_volume         = 75;
     g_debbie_config.notifications_enabled  = true;

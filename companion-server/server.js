@@ -24,6 +24,7 @@ const { startWhatsApp } = require('./whatsapp');
 const { startEmailMonitor } = require('./email_monitor');
 const { SpotifyController } = require('./spotify');
 const { AgentBridge } = require('./agent_bridge');
+const { addNetworkRoutes } = require('./network_tools');
 
 const app    = express();
 const server = http.createServer(app);
@@ -96,6 +97,23 @@ wss.on('connection', (ws, req) => {
     });
 });
 
+/* ── Simple in-process rate limiter ──────────────────────────────────── */
+const _rateLimits = new Map();
+function rateLimitMiddleware(windowMs, maxReqs) {
+    return (req, res, next) => {
+        const key = req.socket.remoteAddress + req.path;
+        const now = Date.now();
+        const entry = _rateLimits.get(key) || { count: 0, resetAt: now + windowMs };
+        if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + windowMs; }
+        entry.count++;
+        _rateLimits.set(key, entry);
+        if (entry.count > maxReqs) {
+            return res.status(429).json({ error: 'Too many requests' });
+        }
+        next();
+    };
+}
+
 /* ── REST API ────────────────────────────────────────────────────────── */
 
 /* Health check */
@@ -109,14 +127,14 @@ app.get('/health', (req, res) => {
 });
 
 /* Send a manual notification to all connected devices */
-app.post('/notify', (req, res) => {
+app.post('/notify', rateLimitMiddleware(60000, 30), (req, res) => {
     const { type = 'system', sender = 'Server', preview = '' } = req.body;
     broadcast({ type, sender, preview });
     res.json({ ok: true, sent_to: devices.size });
 });
 
 /* Spotify control via REST */
-app.post('/spotify', async (req, res) => {
+app.post('/spotify', rateLimitMiddleware(60000, 60), async (req, res) => {
     if (!spotify) return res.status(503).json({ error: 'Spotify not configured' });
     const { action } = req.body;
     const result = await spotify.handleCommand(action);
@@ -171,6 +189,9 @@ async function main() {
         });
         bridge.connect();
     }
+
+    /* Network security tools */
+    addNetworkRoutes(app, broadcast);
 
     server.listen(PORT, '0.0.0.0', () => {
         console.log(`\n🤖 Debbie Companion Server running on port ${PORT}`);

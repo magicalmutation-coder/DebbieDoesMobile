@@ -217,13 +217,15 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base,
             cJSON *name_j = cJSON_GetObjectItem(json, "name");
             cJSON *args_j = cJSON_GetObjectItem(json, "arguments");
             cJSON *id_j   = cJSON_GetObjectItem(json, "call_id");
-            if (name_j && cJSON_IsString(name_j) && id_j) {
+            if (name_j && cJSON_IsString(name_j) && id_j && cJSON_IsString(id_j)) {
+                s_current_response_id[sizeof(s_current_response_id) - 1] = '\0';
                 strncpy(s_current_response_id, id_j->valuestring,
                         sizeof(s_current_response_id) - 1);
                 oai_event_data_t evt = {
-                    .type      = OAI_EVT_FUNCTION_CALL,
-                    .fn.name   = name_j->valuestring,
+                    .type         = OAI_EVT_FUNCTION_CALL,
+                    .fn.name      = name_j->valuestring,
                     .fn.args_json = args_j ? args_j->valuestring : "{}",
+                    .fn.call_id   = s_current_response_id,
                 };
                 if (s_cb) s_cb(&evt, s_ctx);
             }

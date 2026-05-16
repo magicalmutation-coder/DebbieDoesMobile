@@ -27,7 +27,11 @@ typedef struct {
     union {
         struct { const int16_t *pcm; size_t count; } audio;   /* AUDIO_DELTA */
         struct { const char *text;                 } transcript;
-        struct { const char *name; const char *args_json; } fn;/* FUNCTION_CALL */
+        struct {                                               /* FUNCTION_CALL */
+            const char *name;
+            const char *args_json;
+            const char *call_id;  /* Must be passed back to send_function_result */
+        } fn;
         struct { const char *message;              } error;
     };
 } oai_event_data_t;

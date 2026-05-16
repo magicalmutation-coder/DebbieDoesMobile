@@ -25,6 +25,9 @@
 #include "openai_client.h"
 #include "notification_client.h"
 #include "web_server.h"
+#include "network_scanner.h"
+#include "vuln_reporter.h"
+#include "self_agent.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -113,8 +116,8 @@ static void on_oai_event(const oai_event_data_t *evt, void *ctx)
     case OAI_EVT_FUNCTION_CALL:
         ESP_LOGI(TAG, "Function call: %s(%s)", evt->fn.name, evt->fn.args_json);
 
+        /* ── Camera ── */
         if (strcmp(evt->fn.name, "capture_image") == 0) {
-            /* Capture a photo and send it back to the model */
             set_state(DEBBIE_STATE_CAMERA);
             char *b64 = NULL;
             size_t b64_len = 0;
@@ -124,34 +127,32 @@ static void on_oai_event(const oai_event_data_t *evt, void *ctx)
                     "Please describe in detail what you see in this image, "
                     "including objects, people, text, colours, and anything notable.");
                 free(b64);
-                openai_client_send_function_result(
-                    "capture_image",
+                openai_client_send_function_result(evt->fn.call_id,
                     "{\"status\":\"ok\",\"message\":\"Image captured and sent for analysis\"}");
             } else {
-                openai_client_send_function_result(
-                    "capture_image",
+                openai_client_send_function_result(evt->fn.call_id,
                     "{\"status\":\"error\",\"message\":\"Camera capture failed\"}");
             }
             set_state(DEBBIE_STATE_THINKING);
 
+        /* ── Notifications ── */
         } else if (strcmp(evt->fn.name, "read_notifications") == 0) {
             char *summary = notification_client_get_summary_json();
             if (summary) {
                 char result[512];
                 snprintf(result, sizeof(result),
                          "{\"notifications\":%s}", summary);
-                openai_client_send_function_result("read_notifications", result);
+                openai_client_send_function_result(evt->fn.call_id, result);
                 free(summary);
                 notification_client_clear();
                 display_manager_set_notif_count(0);
             } else {
-                openai_client_send_function_result(
-                    "read_notifications",
+                openai_client_send_function_result(evt->fn.call_id,
                     "{\"notifications\":[],\"message\":\"No pending notifications\"}");
             }
 
+        /* ── Spotify ── */
         } else if (strcmp(evt->fn.name, "spotify_control") == 0) {
-            /* Parse action from args_json */
             cJSON *args = cJSON_Parse(evt->fn.args_json);
             cJSON *act  = args ? cJSON_GetObjectItem(args, "action") : NULL;
             if (act && cJSON_IsString(act)) {
@@ -159,11 +160,33 @@ static void on_oai_event(const oai_event_data_t *evt, void *ctx)
                 char result[128];
                 snprintf(result, sizeof(result),
                          "{\"status\":\"ok\",\"action\":\"%s\"}", act->valuestring);
-                openai_client_send_function_result("spotify_control", result);
+                openai_client_send_function_result(evt->fn.call_id, result);
                 set_state(DEBBIE_STATE_SPOTIFY);
+            } else {
+                openai_client_send_function_result(evt->fn.call_id,
+                    "{\"error\":\"action parameter required\"}");
             }
             if (args) cJSON_Delete(args);
+
+        /* ── Network security & self-agent (all other tools) ── */
+        } else {
+            /* Defer to the self_agent dispatcher for:
+             * network_scan, get_vuln_report, system_info,
+             * web_fetch, dns_lookup, cve_lookup */
+            if (!self_agent_handle_function_call(evt->fn.name,
+                                                 evt->fn.args_json,
+                                                 evt->fn.call_id)) {
+                ESP_LOGW(TAG, "Unknown function: %s", evt->fn.name);
+                char result[128];
+                snprintf(result, sizeof(result),
+                         "{\"error\":\"Unknown function: %s\"}", evt->fn.name);
+                openai_client_send_function_result(evt->fn.call_id, result);
+            }
         }
+
+        /* Return to thinking/idle after handling */
+        if (g_debbie_state != DEBBIE_STATE_SPEAKING)
+            set_state(DEBBIE_STATE_THINKING);
         break;
 
     case OAI_EVT_ERROR:
@@ -445,6 +468,9 @@ void app_main(void)
     /* 7. Always start the web server (for setup and status) */
     ESP_ERROR_CHECK(web_server_start());
 
+    /* 8. Network scanner — init after WiFi (even before connecting) */
+    ESP_ERROR_CHECK(net_scanner_init());
+
     if (wifi_err != ESP_OK) {
         /* No WiFi — enter setup mode */
         set_state(DEBBIE_STATE_SETUP);
@@ -462,7 +488,7 @@ void app_main(void)
     display_manager_set_connection_status(true, false);
     display_manager_show_text("✅ Connected!\nConnecting to AI...");
 
-    /* 8. Companion server notifications */
+    /* 9. Companion server notifications */
     if (g_debbie_config.notifications_enabled &&
         strlen(g_debbie_config.companion_url) > 0) {
         esp_err_t notif_err = notification_client_init(
@@ -476,10 +502,10 @@ void app_main(void)
         ESP_LOGI(TAG, "Companion server not configured — notifications disabled");
     }
 
-    /* 9. Battery monitor */
+    /* 10. Battery monitor */
     xTaskCreate(battery_task, "battery", 2048, NULL, 1, NULL);
 
-    /* 10. Connect to AI */
+    /* 11. Connect to AI */
     if (strlen(g_debbie_config.openai_api_key) > 0) {
         esp_err_t ai_err = openai_client_connect(
             g_debbie_config.openai_api_key,
@@ -504,9 +530,9 @@ void app_main(void)
         set_state(DEBBIE_STATE_IDLE);
     }
 
-    /* 11. Start microphone — continuous VAD listening */
+    /* 12. Start microphone — continuous VAD listening */
     ESP_ERROR_CHECK(audio_manager_start_capture(on_audio_capture));
-    ESP_LOGI(TAG, "Debbie is ready! 🎉");
+    ESP_LOGI(TAG, "Debbie is ready! 🎉 (Network scanner active, say 'scan my network' to start)");
 
     /* Main loop — lightweight, most work is in callbacks and tasks */
     while (1) {

@@ -202,7 +202,89 @@ All settings are stored in flash (NVS) and can be updated via the web UI at `htt
 
 ---
 
-## 🔌 Connecting Your Own Agent
+## 🔒 Network Security Testing
+
+> ⚠️ **AUTHORISED USE ONLY** — These tools are for testing **your own networks** or networks you have **explicit written permission** to test. Unauthorised network scanning is illegal under the Computer Misuse Act (UK), CFAA (US), and similar laws worldwide.
+
+Debbie includes a full ethical network security toolkit, voice-commanded through the AI.
+
+### What Debbie Can Scan
+
+| Tool | Description |
+|------|-------------|
+| 🔍 **WiFi Scanner** | Discover all visible networks, check encryption (flags WEP/open APs) |
+| 📡 **ARP Host Discovery** | Find all live devices on your subnet |
+| 🚪 **Port Scanner** | Scan 65+ common service ports per host |
+| 🏷️ **Service Fingerprinting** | Identify running services from banners |
+| 🕵️ **Vulnerability Analysis** | Check against 20+ known-dangerous configurations |
+| 📊 **Risk Scoring** | 0–100 risk score per device with remediation |
+| 🌐 **Web Probe** | Detect HTTP/HTTPS, grab server headers and page titles |
+| 🔬 **CVE Lookup** | Query the NVD database for specific CVE details |
+| 🗺️ **DNS Lookup** | Resolve hostnames from the device |
+
+### Checks Performed
+
+| Check | Severity |
+|-------|---------|
+| Open WiFi networks | HIGH |
+| WEP encryption (crackable in seconds) | CRITICAL |
+| Telnet exposed (plaintext credentials) | HIGH |
+| Docker API on port 2375 (no auth) | CRITICAL |
+| Redis/MongoDB/Elasticsearch (often unauthenticated) | HIGH |
+| Modbus/S7 industrial protocols exposed | CRITICAL |
+| VNC remote desktop exposed | HIGH |
+| MQTT broker without authentication | MEDIUM |
+| SNMP with default community strings | MEDIUM |
+| HTTP without HTTPS | LOW |
+| OpenSSH version fingerprinting | MEDIUM |
+
+### Voice Commands
+
+Just say it to Debbie — no typing needed:
+
+- *"Scan my network"* → Full scan (WiFi + all devices + ports)
+- *"What devices are on my network?"* → Quick host discovery
+- *"Scan the WiFi networks nearby"* → WiFi-only scan
+- *"Check 192.168.1.1 for vulnerabilities"* → Port scan a specific device
+- *"What's the risk score for my router?"* → Risk assessment
+- *"Look up CVE-2021-44228"* → Log4Shell CVE details
+- *"Give me the security report"* → Full vulnerability summary
+- *"What are my highest-risk devices?"* → Prioritised findings
+- *"How do I fix the Redis vulnerability?"* → Remediation guidance
+
+### Companion Server nmap Integration
+
+For more advanced scanning, install nmap on the companion server host:
+
+```bash
+# Linux
+sudo apt install nmap
+
+# macOS
+brew install nmap
+```
+
+Then request a scan via REST:
+```bash
+curl -X POST http://localhost:3001/network/scan \
+  -H "Content-Type: application/json" \
+  -d '{"target": "192.168.1.0/24", "flags": ["-sV", "-O"]}'
+```
+
+Generate an HTML report at `http://localhost:3001/network/report`.
+
+### Self-Assessment
+
+Debbie also audits herself:
+- TLS certificate verification status
+- ESP-IDF firmware version
+- Enabled features and potential risks
+
+Say *"Check yourself for vulnerabilities"* or *"Run a self-assessment"*.
+
+---
+
+
 
 If you have your own AI agent (e.g. a custom LLM server), connect it via:
 

@@ -9,6 +9,9 @@ idf_component_register(
         "openai_client.c"
         "notification_client.c"
         "web_server.c"
+        "network_scanner.c"
+        "vuln_reporter.c"
+        "self_agent.c"
     INCLUDE_DIRS
         "."
     REQUIRES
@@ -29,4 +32,6 @@ idf_component_register(
         esp_timer
         freertos
         log
+        lwip
+        ping
 )
