@@ -104,10 +104,13 @@ static void process_ble_command(const char *json_str)
         return;
     }
 
-#define GET_STR(key, dst) do { \
-    cJSON *j = cJSON_GetObjectItem(json, key); \
-    if (j && cJSON_IsString(j) && strlen(j->valuestring) > 0) \
-        strncpy(dst, j->valuestring, sizeof(dst) - 1); \
+#define GET_STR(key, dst) do {                                         \
+    cJSON *j = cJSON_GetObjectItem(json, key);                         \
+    if (j && cJSON_IsString(j) && j->valuestring[0]) {                 \
+        /* Copy with explicit truncation and NUL-termination */        \
+        strncpy((dst), j->valuestring, sizeof(dst) - 1);               \
+        (dst)[sizeof(dst) - 1] = '\0';                                \
+    }                                                                   \
 } while (0)
 
     /* Network credentials */
@@ -152,13 +155,16 @@ static void process_ble_command(const char *json_str)
 
     storage_save_config();
 
-    /* Acknowledge */
-    char ack[128];
-    snprintf(ack, sizeof(ack),
-             "{\"ok\":true,\"wifi\":\"%s\",\"llm\":\"%s/%s\"}",
-             g_debbie_config.wifi_ssid,
-             g_debbie_config.llm_provider,
-             g_debbie_config.llm_model);
+    /* Acknowledge — truncate fields to avoid overflow */
+    char ssid_trunc[48];
+    char prov_trunc[32];
+    char model_trunc[64];
+    strncpy(ssid_trunc, g_debbie_config.wifi_ssid, sizeof(ssid_trunc) - 1); ssid_trunc[sizeof(ssid_trunc) - 1] = '\0';
+    strncpy(prov_trunc, g_debbie_config.llm_provider, sizeof(prov_trunc) - 1); prov_trunc[sizeof(prov_trunc) - 1] = '\0';
+    strncpy(model_trunc, g_debbie_config.llm_model, sizeof(model_trunc) - 1); model_trunc[sizeof(model_trunc) - 1] = '\0';
+    char ack[256];
+    snprintf(ack, sizeof(ack), "{\"ok\":true,\"wifi\":\"%s\",\"llm\":\"%s/%s\"}",
+             ssid_trunc, prov_trunc, model_trunc);
     bluetooth_manager_notify(ack);
 
     /* Reconnect WiFi with new credentials if SSID changed */

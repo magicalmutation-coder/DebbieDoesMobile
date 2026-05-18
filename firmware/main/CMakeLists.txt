@@ -1,4 +1,16 @@
-idf_component_register(
+execute_process(COMMAND git rev-parse --short HEAD
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                OUTPUT_VARIABLE DEBBIE_GIT_HASH
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET)
+if(NOT DEBBIE_GIT_HASH)
+    set(DEBBIE_GIT_HASH "unknown")
+endif()
+
+set(DEBBIE_BUILD_HEADER "${CMAKE_CURRENT_BINARY_DIR}/build_info.h")
+file(WRITE ${DEBBIE_BUILD_HEADER} "/* Auto-generated build info */\n#ifndef BUILD_INFO_H\n#define BUILD_INFO_H\n#define DEBBIE_GIT_HASH \"${DEBBIE_GIT_HASH}\"\n#endif\n")
+
+idf_component_register(PRIV_REQUIRES esp_driver_i2s 
     SRCS
         "main.c"
         "storage_manager.c"
@@ -16,6 +28,7 @@ idf_component_register(
         "memory_manager.c"
     INCLUDE_DIRS
         "."
+        "${CMAKE_CURRENT_BINARY_DIR}"
     REQUIRES
         nvs_flash
         esp_wifi
@@ -25,16 +38,16 @@ idf_component_register(
         esp_https_ota
         esp_websocket_client
         esp_http_server
+        esp_adc
         esp_camera
         esp_lcd
         driver
         lvgl
-        cJSON
+        cjson
         mbedtls
         esp_timer
         freertos
         log
         lwip
-        ping
         bt
 )

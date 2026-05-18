@@ -6,6 +6,18 @@
 #include "nvs.h"
 #include "esp_log.h"
 #include <string.h>
+#include <stdio.h>
+
+/* Safe fixed-size string copy that always NUL-terminates destination. */
+#define SAFE_STR_COPY(dst, src) do {                                      \
+    size_t _dst_sz = sizeof(dst);                                         \
+    if (_dst_sz > 0) {                                                    \
+        size_t _src_len = strlen(src);                                    \
+        size_t _cpy = (_src_len < (_dst_sz - 1)) ? _src_len : (_dst_sz - 1); \
+        memcpy((dst), (src), _cpy);                                       \
+        (dst)[_cpy] = '\0';                                              \
+    }                                                                      \
+} while (0)
 
 static const char *TAG = "storage";
 
@@ -24,38 +36,32 @@ esp_err_t storage_init(void)
 
     /* populate defaults */
     memset(&g_debbie_config, 0, sizeof(g_debbie_config));
-    strncpy(g_debbie_config.debbie_name, "Debbie", sizeof(g_debbie_config.debbie_name) - 1);
-    strncpy(g_debbie_config.system_prompt,
-            DEBBIE_DEFAULT_SYSTEM_PROMPT,
-            sizeof(g_debbie_config.system_prompt) - 1);
+    SAFE_STR_COPY(g_debbie_config.debbie_name, "Debbie");
+    SAFE_STR_COPY(g_debbie_config.system_prompt, DEBBIE_DEFAULT_SYSTEM_PROMPT);
     g_debbie_config.speaker_volume         = 75;
     g_debbie_config.notifications_enabled  = true;
     g_debbie_config.notif_whatsapp         = true;
     g_debbie_config.notif_email            = true;
+#if DEBBIE_ENABLE_SPOTIFY_RUNTIME
     g_debbie_config.notif_spotify          = true;
+#else
+    g_debbie_config.notif_spotify          = false;
+#endif
     g_debbie_config.camera_enabled         = true;
     g_debbie_config.use_custom_agent       = false;
     g_debbie_config.bluetooth_enabled      = DEBBIE_BLE_DEFAULT_ON;
     g_debbie_config.vad_threshold          = DEFAULT_VAD_THRESHOLD;
-    strncpy(g_debbie_config.agent_ws_url, AGENT_WS_DEFAULT_URL,
-            sizeof(g_debbie_config.agent_ws_url) - 1);
-    strncpy(g_debbie_config.ble_device_name, DEBBIE_BLE_DEVICE_NAME,
-            sizeof(g_debbie_config.ble_device_name) - 1);
-    strncpy(g_debbie_config.llm_provider, DEFAULT_LLM_PROVIDER,
-            sizeof(g_debbie_config.llm_provider) - 1);
-    strncpy(g_debbie_config.llm_model, DEFAULT_LLM_MODEL,
-            sizeof(g_debbie_config.llm_model) - 1);
-    strncpy(g_debbie_config.local_llm_url, LOCAL_LLM_DEFAULT_URL,
-            sizeof(g_debbie_config.local_llm_url) - 1);
-    strncpy(g_debbie_config.local_llm_model, LOCAL_LLM_DEFAULT_MODEL,
-            sizeof(g_debbie_config.local_llm_model) - 1);
+        SAFE_STR_COPY(g_debbie_config.agent_ws_url, AGENT_WS_DEFAULT_URL);
+        SAFE_STR_COPY(g_debbie_config.ble_device_name, DEBBIE_BLE_DEVICE_NAME);
+        SAFE_STR_COPY(g_debbie_config.llm_provider, DEFAULT_LLM_PROVIDER);
+        SAFE_STR_COPY(g_debbie_config.llm_model, DEFAULT_LLM_MODEL);
+        SAFE_STR_COPY(g_debbie_config.local_llm_url, LOCAL_LLM_DEFAULT_URL);
+        SAFE_STR_COPY(g_debbie_config.local_llm_model, LOCAL_LLM_DEFAULT_MODEL);
     g_debbie_config.memory_enabled      = MEMORY_ENABLED_DEFAULT;
     g_debbie_config.memory_rag_enabled  = MEMORY_RAG_ENABLED_DEFAULT;
     g_debbie_config.memory_max_turns    = MEMORY_MAX_TURNS_DEFAULT;
-    strncpy(g_debbie_config.voice_style, DEFAULT_VOICE_STYLE,
-            sizeof(g_debbie_config.voice_style) - 1);
-    strncpy(g_debbie_config.response_length, DEFAULT_RESPONSE_LENGTH,
-            sizeof(g_debbie_config.response_length) - 1);
+        SAFE_STR_COPY(g_debbie_config.voice_style, DEFAULT_VOICE_STYLE);
+        SAFE_STR_COPY(g_debbie_config.response_length, DEFAULT_RESPONSE_LENGTH);
 
     /* try to load from NVS */
     nvs_handle_t nvs;
@@ -107,6 +113,9 @@ esp_err_t storage_init(void)
         g_debbie_config.notif_email = (tmp != 0);
     if (nvs_get_u8(nvs, "notif_sp",   &tmp) == ESP_OK)
         g_debbie_config.notif_spotify = (tmp != 0);
+#if !DEBBIE_ENABLE_SPOTIFY_RUNTIME
+    g_debbie_config.notif_spotify = false;
+#endif
     if (nvs_get_u8(nvs, "cam_en",     &tmp) == ESP_OK)
         g_debbie_config.camera_enabled = (tmp != 0);
     if (nvs_get_u8(nvs, "bt_en",      &tmp) == ESP_OK)

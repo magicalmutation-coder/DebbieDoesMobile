@@ -16,20 +16,21 @@
 #include "lwip/inet.h"
 #include "lwip/ip4_addr.h"
 #include "lwip/opt.h"
-#include "ping/ping_sock.h"
 #include "esp_http_client.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include "esp_timer.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include "esp_heap_caps.h"
 
 static const char *TAG = "netscan";
 
-/* ── Shared results buffer ────────────────────────────────────────────────── */
-static scan_results_t s_results;
+/* ── Shared results buffer (allocate in PSRAM at init to avoid large .bss) */
+static scan_results_t *s_results = NULL;
 static SemaphoreHandle_t s_mutex = NULL;
 static bool s_cancel = false;
 
@@ -215,7 +216,7 @@ static void compute_risk(host_result_t *host)
         strncat(findings, "No open ports detected.", sizeof(findings)-strlen(findings)-1);
 
     host->risk_score = score > 100 ? 100 : score;
-    strncpy(host->risk_summary, findings, sizeof(host->risk_summary) - 1);
+    snprintf(host->risk_summary, sizeof(host->risk_summary), "%s", findings);
 }
 
 /* ── TCP port probe ───────────────────────────────────────────────────────── */
@@ -304,9 +305,13 @@ static void http_probe(host_result_t *host)
                 if (use_https) host->has_https = true;
                 else           host->has_http  = true;
 
-                /* Grab Server header */
-                esp_http_client_get_header(cli, "Server",
-                    host->http_server, sizeof(host->http_server) - 1);
+                /* Grab Server header (API returns header string via out param) */
+                char *server_hdr = NULL;
+                if (esp_http_client_get_header(cli, "Server", &server_hdr) == ESP_OK && server_hdr) {
+                    snprintf(host->http_server, sizeof(host->http_server), "%s", server_hdr);
+                } else {
+                    host->http_server[0] = '\0';
+                }
 
                 /* Read body to find <title> */
                 int len = esp_http_client_read_response(cli, resp_buf, sizeof(resp_buf) - 1);
@@ -339,8 +344,8 @@ static bool arp_ping(uint8_t *target_ip)
      * On ESP-IDF, we use a quick TCP connect to trigger ARP, then check
      * the ARP cache via the netif. */
     char ip_str[16];
-    snprintf(ip_str, sizeof(ip_str), "%d.%d.%d.%d",
-             target_ip[0], target_ip[1], target_ip[2], target_ip[3]);
+    snprintf(ip_str, sizeof(ip_str), "%u.%u.%u.%u",
+             (unsigned)target_ip[0], (unsigned)target_ip[1], (unsigned)target_ip[2], (unsigned)target_ip[3]);
 
     /* Quick ICMP ping via the ping socket API */
     uint32_t rtt = 0;
@@ -352,7 +357,16 @@ static bool arp_ping(uint8_t *target_ip)
 
 esp_err_t net_scanner_init(void)
 {
-    memset(&s_results, 0, sizeof(s_results));
+    if (!s_results) {
+        /* Prefer PSRAM allocation for the large results buffer */
+        s_results = heap_caps_malloc(sizeof(scan_results_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!s_results) {
+            ESP_LOGW(TAG, "PSRAM allocation failed for scan results, falling back to internal heap");
+            s_results = malloc(sizeof(scan_results_t));
+            if (!s_results) return ESP_ERR_NO_MEM;
+        }
+    }
+    memset(s_results, 0, sizeof(*s_results));
     if (!s_mutex) s_mutex = xSemaphoreCreateMutex();
     ESP_LOGI(TAG, "Network scanner initialised");
     return ESP_OK;
@@ -386,10 +400,10 @@ esp_err_t net_scanner_wifi_scan(scan_progress_cb_t progress_cb, void *ctx)
     if (err != ESP_OK) return err;
 
     if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(1000))) {
-        s_results.ap_count = ap_count;
+        s_results->ap_count = ap_count;
         for (int i = 0; i < ap_count; i++) {
-            wifi_ap_result_t *r = &s_results.aps[i];
-            strncpy(r->ssid, (char *)aps[i].ssid, sizeof(r->ssid) - 1);
+            wifi_ap_result_t *r = &s_results->aps[i];
+            snprintf(r->ssid, sizeof(r->ssid), "%s", (char *)aps[i].ssid);
             memcpy(r->bssid, aps[i].bssid, 6);
             snprintf(r->bssid_str, sizeof(r->bssid_str),
                      "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -398,7 +412,7 @@ esp_err_t net_scanner_wifi_scan(scan_progress_cb_t progress_cb, void *ctx)
             r->rssi     = aps[i].rssi;
             r->channel  = aps[i].primary;
             r->auth_mode = aps[i].authmode;
-            strncpy(r->auth_str, auth_str(aps[i].authmode), sizeof(r->auth_str)-1);
+            snprintf(r->auth_str, sizeof(r->auth_str), "%s", auth_str(aps[i].authmode));
             r->hidden   = (strlen(r->ssid) == 0);
         }
         xSemaphoreGive(s_mutex);
@@ -435,21 +449,21 @@ esp_err_t net_scanner_arp_scan(scan_progress_cb_t progress_cb,
     own_ip[1] = (base_ip >> 16) & 0xFF;
     own_ip[2] = (base_ip >> 8)  & 0xFF;
     own_ip[3] =  base_ip        & 0xFF;
-    snprintf(s_results.own_ip, sizeof(s_results.own_ip),
-             "%d.%d.%d.%d", own_ip[0], own_ip[1], own_ip[2], own_ip[3]);
+    snprintf(s_results->own_ip, sizeof(s_results->own_ip),
+             "%u.%u.%u.%u", (unsigned)own_ip[0], (unsigned)own_ip[1], (unsigned)own_ip[2], (unsigned)own_ip[3]);
 
     uint32_t gw = ntohl(ip_info.gw.addr);
-    snprintf(s_results.gateway_ip, sizeof(s_results.gateway_ip),
-             "%d.%d.%d.%d",
-             (gw>>24)&0xFF, (gw>>16)&0xFF, (gw>>8)&0xFF, gw&0xFF);
+    snprintf(s_results->gateway_ip, sizeof(s_results->gateway_ip),
+             "%u.%u.%u.%u",
+             (unsigned)((gw>>24)&0xFF), (unsigned)((gw>>16)&0xFF), (unsigned)((gw>>8)&0xFF), (unsigned)(gw&0xFF));
 
-    snprintf(s_results.subnet_mask, sizeof(s_results.subnet_mask),
-             "%d.%d.%d.%d",
-             (mask>>24)&0xFF, (mask>>16)&0xFF, (mask>>8)&0xFF, mask&0xFF);
+    snprintf(s_results->subnet_mask, sizeof(s_results->subnet_mask),
+             "%u.%u.%u.%u",
+             (unsigned)((mask>>24)&0xFF), (unsigned)((mask>>16)&0xFF), (unsigned)((mask>>8)&0xFF), (unsigned)(mask&0xFF));
 
     if (progress_cb) progress_cb(0, "Discovering hosts on subnet...", ctx);
 
-    s_results.host_count = 0;
+    s_results->host_count = 0;
     int found = 0;
 
     for (uint32_t i = 1; i <= host_max && !s_cancel; i++) {
@@ -474,13 +488,13 @@ esp_err_t net_scanner_arp_scan(scan_progress_cb_t progress_cb,
             host_result_t host = { 0 };
             memcpy(host.ip, tip, 4);
             snprintf(host.ip_str, sizeof(host.ip_str),
-                     "%d.%d.%d.%d", tip[0], tip[1], tip[2], tip[3]);
+                     "%u.%u.%u.%u", (unsigned)tip[0], (unsigned)tip[1], (unsigned)tip[2], (unsigned)tip[3]);
             host.alive = true;
-            strncpy(host.vendor, lookup_vendor(host.mac), sizeof(host.vendor)-1);
+            snprintf(host.vendor, sizeof(host.vendor), "%s", lookup_vendor(host.mac));
 
             if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(200))) {
-                if (s_results.host_count < MAX_HOSTS) {
-                    s_results.hosts[s_results.host_count++] = host;
+                if (s_results->host_count < MAX_HOSTS) {
+                    s_results->hosts[s_results->host_count++] = host;
                 }
                 xSemaphoreGive(s_mutex);
             }
@@ -530,8 +544,8 @@ esp_err_t net_scanner_port_scan(const char    *host_ip,
             pr->proto = SCAN_PROTO_TCP;
             pr->state = PORT_STATE_OPEN;
             pr->rtt_ms = rtt;
-            strncpy(pr->service, svc,    sizeof(pr->service) - 1);
-            strncpy(pr->banner,  banner, sizeof(pr->banner)  - 1);
+            snprintf(pr->service, sizeof(pr->service), "%s", svc);
+            snprintf(pr->banner, sizeof(pr->banner), "%s", banner);
             ESP_LOGI(TAG, "%s:%d open (%s)", host_ip, port, svc);
         }
 
@@ -593,8 +607,8 @@ static void full_scan_task(void *pvParam)
 {
     full_scan_args_t *args = (full_scan_args_t *)pvParam;
     s_cancel = false;
-    s_results.in_progress = true;
-    s_results.scan_start_ms = esp_timer_get_time() / 1000;
+    s_results->in_progress = true;
+    s_results->scan_start_ms = esp_timer_get_time() / 1000;
 
     /* Stage 1: WiFi scan */
     if (!s_cancel) {
@@ -610,13 +624,17 @@ static void full_scan_task(void *pvParam)
 
     /* Stage 3: Port scan each host */
     if (!s_cancel) {
-        int total = s_results.host_count;
+        int total = s_results->host_count;
         for (int i = 0; i < total && !s_cancel; i++) {
-            host_result_t *host = &s_results.hosts[i];
-            char stage[64];
+            host_result_t *host = &s_results->hosts[i];
+            char stage[128];
+            /* Truncate IP string into a small buffer to keep stage formatting bounded */
+            char ipbuf[32];
+            strncpy(ipbuf, host->ip_str, sizeof(ipbuf) - 1);
+            ipbuf[sizeof(ipbuf) - 1] = '\0';
             snprintf(stage, sizeof(stage),
                      "Stage 3/3: Port scanning %s (%d/%d)",
-                     host->ip_str, i + 1, total);
+                     ipbuf, i + 1, total);
             if (args->progress_cb)
                 args->progress_cb((uint8_t)(50 + i * 40 / (total ? total : 1)),
                                   stage, args->ctx);
@@ -624,14 +642,14 @@ static void full_scan_task(void *pvParam)
         }
     }
 
-    s_results.in_progress       = false;
-    s_results.scan_duration_ms  = esp_timer_get_time() / 1000 - s_results.scan_start_ms;
+    s_results->in_progress       = false;
+    s_results->scan_duration_ms  = esp_timer_get_time() / 1000 - s_results->scan_start_ms;
 
     if (args->progress_cb) args->progress_cb(100, "Scan complete!", args->ctx);
-    if (args->done_cb) args->done_cb(&s_results, args->ctx);
+    if (args->done_cb) args->done_cb(s_results, args->ctx);
 
     ESP_LOGI(TAG, "Full scan done in %lld ms — %d hosts, %d APs",
-             s_results.scan_duration_ms, s_results.host_count, s_results.ap_count);
+             s_results->scan_duration_ms, s_results->host_count, s_results->ap_count);
 
     free(args);
     vTaskDelete(NULL);
@@ -641,15 +659,15 @@ esp_err_t net_scanner_full_scan(scan_progress_cb_t progress_cb,
                                  scan_done_cb_t     done_cb,
                                  void              *ctx)
 {
-    if (s_results.in_progress) {
+    if (s_results->in_progress) {
         ESP_LOGW(TAG, "Scan already in progress");
         return ESP_ERR_INVALID_STATE;
     }
     /* Reset previous results */
-    memset(&s_results.hosts, 0, sizeof(s_results.hosts));
-    s_results.host_count = 0;
-    memset(&s_results.aps, 0, sizeof(s_results.aps));
-    s_results.ap_count = 0;
+    memset(s_results->hosts, 0, sizeof(s_results->hosts));
+    s_results->host_count = 0;
+    memset(s_results->aps, 0, sizeof(s_results->aps));
+    s_results->ap_count = 0;
 
     full_scan_args_t *args = malloc(sizeof(full_scan_args_t));
     if (!args) return ESP_ERR_NO_MEM;
@@ -668,7 +686,7 @@ void net_scanner_cancel(void)
     ESP_LOGI(TAG, "Scan cancelled");
 }
 
-const scan_results_t *net_scanner_get_results(void) { return &s_results; }
+const scan_results_t *net_scanner_get_results(void) { return s_results; }
 
 /* ── JSON serialisation ───────────────────────────────────────────────────── */
 
@@ -677,15 +695,15 @@ char *net_scanner_results_to_json(bool include_banners)
     cJSON *root = cJSON_CreateObject();
 
     /* Metadata */
-    cJSON_AddStringToObject(root, "own_ip",      s_results.own_ip);
-    cJSON_AddStringToObject(root, "gateway_ip",  s_results.gateway_ip);
-    cJSON_AddStringToObject(root, "subnet_mask", s_results.subnet_mask);
-    cJSON_AddNumberToObject(root, "scan_duration_ms", s_results.scan_duration_ms);
+    cJSON_AddStringToObject(root, "own_ip",      s_results->own_ip);
+    cJSON_AddStringToObject(root, "gateway_ip",  s_results->gateway_ip);
+    cJSON_AddStringToObject(root, "subnet_mask", s_results->subnet_mask);
+    cJSON_AddNumberToObject(root, "scan_duration_ms", s_results->scan_duration_ms);
 
     /* WiFi APs */
     cJSON *aps = cJSON_CreateArray();
-    for (int i = 0; i < s_results.ap_count; i++) {
-        wifi_ap_result_t *a = &s_results.aps[i];
+    for (int i = 0; i < s_results->ap_count; i++) {
+        wifi_ap_result_t *a = &s_results->aps[i];
         cJSON *ap = cJSON_CreateObject();
         cJSON_AddStringToObject(ap, "ssid",     a->ssid[0] ? a->ssid : "<hidden>");
         cJSON_AddStringToObject(ap, "bssid",    a->bssid_str);
@@ -699,8 +717,8 @@ char *net_scanner_results_to_json(bool include_banners)
 
     /* Hosts */
     cJSON *hosts = cJSON_CreateArray();
-    for (int i = 0; i < s_results.host_count; i++) {
-        host_result_t *h = &s_results.hosts[i];
+    for (int i = 0; i < s_results->host_count; i++) {
+        host_result_t *h = &s_results->hosts[i];
         cJSON *hobj = cJSON_CreateObject();
         cJSON_AddStringToObject(hobj, "ip",          h->ip_str);
         cJSON_AddStringToObject(hobj, "mac",         h->mac_str);
@@ -744,27 +762,27 @@ char *net_scanner_get_summary(void)
     int offset = 0;
     offset += snprintf(buf + offset, 1024 - offset,
         "Network scan results — %d devices found, %d WiFi networks visible.\n",
-        s_results.host_count, s_results.ap_count);
+        s_results->host_count, s_results->ap_count);
 
     /* Open APs warning */
     int open_aps = 0;
-    for (int i = 0; i < s_results.ap_count; i++)
-        if (s_results.aps[i].auth_mode == WIFI_AUTH_OPEN) open_aps++;
+    for (int i = 0; i < s_results->ap_count; i++)
+        if (s_results->aps[i].auth_mode == WIFI_AUTH_OPEN) open_aps++;
     if (open_aps > 0)
         offset += snprintf(buf + offset, 1024 - offset,
             "⚠️ %d open (unencrypted) WiFi networks nearby.\n", open_aps);
 
     /* High-risk hosts */
     int high_risk = 0;
-    for (int i = 0; i < s_results.host_count; i++)
-        if (s_results.hosts[i].risk_score >= 30) high_risk++;
+    for (int i = 0; i < s_results->host_count; i++)
+        if (s_results->hosts[i].risk_score >= 30) high_risk++;
     if (high_risk > 0)
         offset += snprintf(buf + offset, 1024 - offset,
             "🔴 %d high-risk device(s) found.\n", high_risk);
 
     /* Per-host summary */
-    for (int i = 0; i < s_results.host_count; i++) {
-        host_result_t *h = &s_results.hosts[i];
+    for (int i = 0; i < s_results->host_count; i++) {
+        host_result_t *h = &s_results->hosts[i];
         offset += snprintf(buf + offset, 1024 - offset,
             "%s (%s) — %d open ports, risk %d/100. %s\n",
             h->ip_str, h->vendor, h->port_count, h->risk_score,

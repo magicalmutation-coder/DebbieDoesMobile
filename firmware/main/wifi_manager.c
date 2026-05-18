@@ -10,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include <string.h>
+#include <stdio.h>
 
 static const char *TAG = "wifi";
 
@@ -20,6 +21,8 @@ static const char *TAG = "wifi";
 static EventGroupHandle_t s_wifi_event_group;
 static int                s_retry_count = 0;
 static bool               s_connected   = false;
+static esp_netif_t       *s_sta_netif   = NULL;
+static esp_netif_t       *s_ap_netif    = NULL;
 
 /* -------------------------------------------------------------------------- */
 
@@ -75,12 +78,41 @@ static esp_err_t try_connect(const char *ssid, const char *password)
     xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
     s_retry_count = 0;
 
+    /* Reconfigure can be triggered from setup portal while WiFi is still in
+     * AP-only mode. Move to APSTA first so STA config/connect is valid. */
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    esp_err_t rc = esp_wifi_get_mode(&mode);
+    if (rc != ESP_OK) {
+        ESP_LOGW(TAG, "esp_wifi_get_mode failed: %s", esp_err_to_name(rc));
+        return rc;
+    }
+    if (mode == WIFI_MODE_AP) {
+        rc = esp_wifi_set_mode(WIFI_MODE_APSTA);
+        if (rc != ESP_OK) {
+            ESP_LOGW(TAG, "esp_wifi_set_mode(APSTA) failed: %s", esp_err_to_name(rc));
+            return rc;
+        }
+    }
+
     wifi_config_t sta_config = { 0 };
     strncpy((char *)sta_config.sta.ssid,     ssid,     sizeof(sta_config.sta.ssid) - 1);
     strncpy((char *)sta_config.sta.password, password, sizeof(sta_config.sta.password) - 1);
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_config));
-    esp_wifi_disconnect();
-    esp_wifi_connect();
+    rc = esp_wifi_set_config(WIFI_IF_STA, &sta_config);
+    if (rc != ESP_OK) {
+        ESP_LOGW(TAG, "esp_wifi_set_config(STA) failed: %s", esp_err_to_name(rc));
+        return rc;
+    }
+
+    rc = esp_wifi_disconnect();
+    if (rc != ESP_OK && rc != ESP_ERR_WIFI_NOT_CONNECT) {
+        ESP_LOGW(TAG, "esp_wifi_disconnect failed: %s", esp_err_to_name(rc));
+    }
+
+    rc = esp_wifi_connect();
+    if (rc != ESP_OK) {
+        ESP_LOGW(TAG, "esp_wifi_connect failed: %s", esp_err_to_name(rc));
+        return rc;
+    }
 
     EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
                                            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
@@ -96,8 +128,8 @@ esp_err_t wifi_manager_init(void)
     s_wifi_event_group = xEventGroupCreate();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
-    esp_netif_create_default_wifi_ap();
+    s_sta_netif = esp_netif_create_default_wifi_sta();
+    s_ap_netif  = esp_netif_create_default_wifi_ap();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -161,6 +193,47 @@ esp_err_t wifi_manager_init(void)
 }
 
 bool wifi_manager_is_connected(void) { return s_connected; }
+
+static bool format_netif_ip(esp_netif_t *netif, char *buf, size_t len)
+{
+    if (!buf || len == 0) {
+        return false;
+    }
+
+    buf[0] = '\0';
+    if (!netif) {
+        snprintf(buf, len, "--");
+        return false;
+    }
+
+    esp_netif_ip_info_t ip_info = { 0 };
+    esp_err_t rc = esp_netif_get_ip_info(netif, &ip_info);
+    if (rc != ESP_OK || ip_info.ip.addr == 0) {
+        snprintf(buf, len, "--");
+        return false;
+    }
+
+    snprintf(buf, len, IPSTR, IP2STR(&ip_info.ip));
+    return true;
+}
+
+bool wifi_manager_get_sta_ip(char *buf, size_t len)
+{
+    return format_netif_ip(s_sta_netif, buf, len);
+}
+
+bool wifi_manager_get_ap_ip(char *buf, size_t len)
+{
+    if (!buf || len == 0) {
+        return false;
+    }
+    if (format_netif_ip(s_ap_netif, buf, len)) {
+        return true;
+    }
+
+    snprintf(buf, len, "%s", DEBBIE_AP_IP);
+    return false;
+}
 
 esp_err_t wifi_manager_reconnect(void)
 {

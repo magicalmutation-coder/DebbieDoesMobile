@@ -1,0 +1,172 @@
+# DebbieBot External API Handoff (ESP32 / IoT)
+
+This document is the integration contract for external clients that need to call DebbieBot over HTTP.
+
+## 1. Base URL
+
+Use the DebbieBot server host and port, then append the external base path:
+
+- Base path: /api/external
+- Example: http://l1:3000/api/external
+
+## 2. Authentication (Required)
+
+All /api/external/* endpoints require an API key.
+
+Preferred header format:
+
+Authorization: Bearer YOUR_EXTERNAL_API_KEY
+
+Current accepted fallbacks (for backward compatibility):
+
+- x-api-key: YOUR_EXTERNAL_API_KEY
+- x-debbie-key: YOUR_EXTERNAL_API_KEY
+- Query parameter: ?key=YOUR_EXTERNAL_API_KEY
+
+Recommended for all new integrations: use Authorization Bearer only.
+
+## 3. Endpoint Contract
+
+### 3.1 Health
+
+- Method: GET
+- Path: /health
+- Full URL example: http://l1:3000/api/external/health
+- Purpose: quick liveness and runtime uptime check
+
+Typical response fields:
+
+- ok
+- time
+- uptimeSec
+- sessionId
+
+### 3.2 Event Feed (polling)
+
+- Method: GET
+- Path: /events
+- Full URL example: http://l1:3000/api/external/events
+- Query params:
+  - since: unix epoch milliseconds (optional)
+  - limit: number of events, max 200 (optional)
+  - topics: comma-separated topic filters (optional)
+
+Typical response fields:
+
+- ok
+- now
+- count
+- events[]
+
+Event topics commonly include:
+
+- mail.incoming
+- mail.sent
+- whatsapp.incoming
+- whatsapp.outgoing
+- agent.command
+- agent.response
+- agent.error
+
+### 3.3 Agent Query
+
+- Method: POST
+- Path: /query
+- Full URL example: http://l1:3000/api/external/query
+- Content-Type: application/json
+
+Request body:
+
+{
+  "text": "Summarize unread Outlook mail and WhatsApp alerts",
+  "sessionId": "optional-existing-session-id"
+}
+
+Notes:
+
+- text is required
+- If sessionId is omitted or invalid, server uses active/default session
+
+Typical response fields:
+
+- ok
+- sessionId
+- content
+- stats
+- id
+
+### 3.4 WhatsApp Status
+
+- Method: GET
+- Path: /whatsapp/status
+- Full URL example: http://l1:3000/api/external/whatsapp/status
+- Purpose: read current WhatsApp bridge state
+
+## 4. API Key Management (Debbie Web Session Auth)
+
+These routes are for Debbie authenticated web users (not external API key auth):
+
+- GET /api/external/key/status
+- POST /api/external/key/rotate
+
+Operational flow:
+
+1. Debbie admin checks key status.
+2. Debbie admin rotates key when required.
+3. New key is distributed securely to external clients.
+
+## 5. Error Contract
+
+- 401 Unauthorized: key missing or key mismatch
+- 503 Service Unavailable: external API key not configured
+- 404 Not Found: external endpoint not found
+- 400 Bad Request: invalid payload (for example missing text in /query)
+
+## 6. Minimal Client Request Examples
+
+### 6.1 Health Check
+
+curl -H "Authorization: Bearer YOUR_EXTERNAL_API_KEY" http://l1:3000/api/external/health
+
+### 6.2 Event Poll
+
+curl -H "Authorization: Bearer YOUR_EXTERNAL_API_KEY" "http://l1:3000/api/external/events?limit=50&topics=mail,whatsapp"
+
+### 6.3 Agent Query
+
+curl -X POST \
+  -H "Authorization: Bearer YOUR_EXTERNAL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Ping from remote agent"}' \
+  http://l1:3000/api/external/query
+
+## 6.4 Postman Assets
+
+Import the ready-to-use Postman files from this same folder:
+
+- EXTERNAL_API.postman_collection.json
+- EXTERNAL_API.postman_environment.json
+
+After import, set environment variables:
+
+- baseUrl
+- externalApiKey
+- sessionCookie (only needed for key status/rotate routes)
+
+## 7. Security Guidance for Integrators
+
+- Treat the API key as a secret and store it in secure config, not source code.
+- Prefer Authorization Bearer over query string key usage.
+- Rotate keys on operator change or suspected leakage.
+- Use HTTPS in production environments.
+
+## 8. Server Reference (Implementation)
+
+Current contract is implemented in v1/server.js at:
+
+- getExternalApiKey
+- getProvidedApiKey
+- requireExternalApiKey
+- /api/external/key/status
+- /api/external/key/rotate
+- /api/external/* route handler

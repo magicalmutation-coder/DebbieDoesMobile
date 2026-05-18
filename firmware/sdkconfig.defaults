@@ -46,6 +46,13 @@ CONFIG_BT_CTRL_BLE_STATIC_ACL_TX_BUF_NB=0
 # Development only:
 CONFIG_ESP_TLS_INSECURE=y
 CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY=y
+# CONFIG_MBEDTLS_CERTIFICATE_BUNDLE is not set
+
+# Improve TLS handshake stability for OpenAI websocket/HTTPS by avoiding
+# constrained internal mbedTLS allocator.
+# CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC is not set
+CONFIG_MBEDTLS_DEFAULT_MEM_ALLOC=y
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 
 # NVS encryption (disabled for simplicity — enable for production)
 CONFIG_NVS_ENCRYPTION=n

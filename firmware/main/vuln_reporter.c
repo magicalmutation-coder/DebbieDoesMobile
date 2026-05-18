@@ -21,6 +21,17 @@
 
 static const char *TAG = "vulnrpt";
 
+/* Safe fixed-size copy that always NUL-terminates the destination. */
+#define SAFE_COPY_TO(dst, src) do {                                     \
+    size_t _dst_sz = sizeof(dst);                                       \
+    if (_dst_sz > 0) {                                                  \
+        size_t _src_len = strlen(src);                                  \
+        size_t _cpy = (_src_len < (_dst_sz - 1)) ? _src_len : (_dst_sz - 1); \
+        memcpy((dst), (src), _cpy);                                     \
+        (dst)[_cpy] = '\0';                                             \
+    }                                                                    \
+} while (0)
+
 /* ── Known-vulnerable service signatures ─────────────────────────────────── */
 
 typedef struct {
@@ -223,35 +234,34 @@ static void check_wifi_security(const scan_results_t *scan,
         const char *ssid = ap->ssid[0] ? ap->ssid : "<hidden>";
 
         if (ap->auth_mode == WIFI_AUTH_OPEN && report->count < MAX_FINDINGS) {
-            vuln_finding_t *f = &report->findings[report->count++];
-            f->severity = VULN_SEV_HIGH;
-            strncpy(f->id,    "WIFI-OPEN-001",             sizeof(f->id)-1);
-            snprintf(f->title, sizeof(f->title),
+                vuln_finding_t *f = &report->findings[report->count++];
+                f->severity = VULN_SEV_HIGH;
+                snprintf(f->id, sizeof(f->id), "%s", "WIFI-OPEN-001");
+                snprintf(f->title, sizeof(f->title),
                      "Open WiFi network: \"%s\"", ssid);
-            snprintf(f->description, sizeof(f->description),
+                snprintf(f->description, sizeof(f->description),
                      "Network '%s' (channel %d, BSSID %s) has no encryption. "
                      "All traffic on this network is visible to any nearby observer.",
                      ssid, ap->channel, ap->bssid_str);
-            strncpy(f->remediation,
+                snprintf(f->remediation, sizeof(f->remediation),
+                    "%s",
                     "Enable WPA2-PSK or WPA3 encryption. "
-                    "If intentional (guest AP), isolate it from the main LAN.",
-                    sizeof(f->remediation)-1);
+                    "If intentional (guest AP), isolate it from the main LAN.");
         }
 
         if (ap->auth_mode == WIFI_AUTH_WEP && report->count < MAX_FINDINGS) {
-            vuln_finding_t *f = &report->findings[report->count++];
-            f->severity = VULN_SEV_CRITICAL;
-            strncpy(f->id,    "WIFI-WEP-001",              sizeof(f->id)-1);
-            snprintf(f->title, sizeof(f->title),
+                vuln_finding_t *f = &report->findings[report->count++];
+                f->severity = VULN_SEV_CRITICAL;
+                snprintf(f->id, sizeof(f->id), "%s", "WIFI-WEP-001");
+                snprintf(f->title, sizeof(f->title),
                      "WEP encryption on \"%s\" — broken, easily cracked", ssid);
-            snprintf(f->description, sizeof(f->description),
+                snprintf(f->description, sizeof(f->description),
                      "Network '%s' uses WEP encryption which can be cracked in "
                      "under 60 seconds using freely available tools. This provides "
                      "no meaningful security protection.", ssid);
-            strncpy(f->remediation,
+                snprintf(f->remediation, sizeof(f->remediation), "%s",
                     "Replace WEP with WPA2-PSK (AES/CCMP) or WPA3 immediately. "
-                    "All connected clients must be re-configured.",
-                    sizeof(f->remediation)-1);
+                    "All connected clients must be re-configured.");
         }
     }
 }
@@ -265,11 +275,11 @@ static void add_finding(vuln_report_t *report, const port_vuln_t *pv,
     vuln_finding_t *f = &report->findings[report->count++];
     f->severity      = pv->severity;
     f->affected_port = port;
-    strncpy(f->id,           pv->vuln_id,      sizeof(f->id)-1);
-    strncpy(f->title,        pv->title,        sizeof(f->title)-1);
-    strncpy(f->description,  pv->description,  sizeof(f->description)-1);
-    strncpy(f->remediation,  pv->remediation,  sizeof(f->remediation)-1);
-    strncpy(f->affected_ip,  ip,               sizeof(f->affected_ip)-1);
+    SAFE_COPY_TO(f->id, pv->vuln_id);
+    SAFE_COPY_TO(f->title, pv->title);
+    SAFE_COPY_TO(f->description, pv->description);
+    SAFE_COPY_TO(f->remediation, pv->remediation);
+    SAFE_COPY_TO(f->affected_ip, ip);
 }
 
 static void add_banner_finding(vuln_report_t *report, const banner_sig_t *bs,
@@ -279,11 +289,11 @@ static void add_banner_finding(vuln_report_t *report, const banner_sig_t *bs,
     vuln_finding_t *f = &report->findings[report->count++];
     f->severity      = bs->severity;
     f->affected_port = port;
-    strncpy(f->id,          bs->vuln_id,     sizeof(f->id)-1);
-    strncpy(f->title,       bs->title,       sizeof(f->title)-1);
-    strncpy(f->description, bs->description, sizeof(f->description)-1);
-    strncpy(f->remediation, bs->remediation, sizeof(f->remediation)-1);
-    strncpy(f->affected_ip, ip,              sizeof(f->affected_ip)-1);
+    SAFE_COPY_TO(f->id, bs->vuln_id);
+    SAFE_COPY_TO(f->title, bs->title);
+    SAFE_COPY_TO(f->description, bs->description);
+    SAFE_COPY_TO(f->remediation, bs->remediation);
+    SAFE_COPY_TO(f->affected_ip, ip);
 }
 
 /* ── Count by severity ────────────────────────────────────────────────────── */
@@ -324,8 +334,33 @@ esp_err_t vuln_reporter_analyse(const scan_results_t *scan,
     strftime(report->scan_timestamp, sizeof(report->scan_timestamp),
              "%Y-%m-%d %H:%M:%S", &tm_info);
 
-    snprintf(report->network_cidr, sizeof(report->network_cidr),
-             "%s/%s", scan->own_ip, scan->subnet_mask);
+    /* Safely construct network_cidr without risking format-truncation warnings.
+     * Build manually by copying bounded amounts and always NUL-terminating. */
+    char ipbuf[16];
+    char maskbuf[16];
+    strncpy(ipbuf, scan->own_ip, sizeof(ipbuf) - 1); ipbuf[sizeof(ipbuf) - 1] = '\0';
+    strncpy(maskbuf, scan->subnet_mask, sizeof(maskbuf) - 1); maskbuf[sizeof(maskbuf) - 1] = '\0';
+    /* Manual safe assembly: ip + '/' + mask, truncated as needed */
+    size_t _dst_sz = sizeof(report->network_cidr);
+    size_t _pos = 0;
+    size_t _to_copy = strnlen(ipbuf, sizeof(ipbuf));
+    if (_to_copy > 0) {
+        size_t _cpy = (_to_copy < _dst_sz - 1) ? _to_copy : _dst_sz - 1;
+        memcpy(report->network_cidr + _pos, ipbuf, _cpy);
+        _pos += _cpy;
+    }
+    if (_pos < _dst_sz - 1) {
+        report->network_cidr[_pos++] = '/';
+    }
+    if (_pos < _dst_sz - 1) {
+        size_t _mask_len = strnlen(maskbuf, sizeof(maskbuf));
+        size_t _cpy2 = (_mask_len < (_dst_sz - _pos - 1)) ? _mask_len : (_dst_sz - _pos - 1);
+        if (_cpy2 > 0) {
+            memcpy(report->network_cidr + _pos, maskbuf, _cpy2);
+            _pos += _cpy2;
+        }
+    }
+    report->network_cidr[_pos < _dst_sz ? _pos : _dst_sz - 1] = '\0';
 
     /* WiFi security checks */
     check_wifi_security(scan, report);
@@ -520,10 +555,14 @@ char *vuln_reporter_get_voice_summary(const vuln_report_t *report)
     /* Mention the worst finding */
     if (report->count > 0) {
         const vuln_finding_t *worst = &report->findings[0];
+        /* Truncate the title into a local buffer before formatting */
+        char worst_title[64];
+        strncpy(worst_title, worst->title, sizeof(worst_title) - 1);
+        worst_title[sizeof(worst_title) - 1] = '\0';
         off += snprintf(buf + off, 512 - off,
             "The most serious issue is: %s. I've logged the full report. "
             "Shall I walk you through the fixes?",
-            worst->title);
+            worst_title);
     }
 
     return buf;
@@ -543,25 +582,22 @@ esp_err_t vuln_reporter_self_assess(vuln_report_t *report)
     localtime_r(&now, &tm_info);
     strftime(report->scan_timestamp, sizeof(report->scan_timestamp),
              "%Y-%m-%d %H:%M:%S", &tm_info);
-    strncpy(report->network_cidr, "device-self", sizeof(report->network_cidr)-1);
+    snprintf(report->network_cidr, sizeof(report->network_cidr), "%s", "device-self");
 
     /* Check TLS config */
 #ifdef CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY
     if (report->count < MAX_FINDINGS) {
         vuln_finding_t *f = &report->findings[report->count++];
         f->severity = VULN_SEV_HIGH;
-        strncpy(f->id, "SELF-TLS-001", sizeof(f->id)-1);
-        strncpy(f->title, "TLS certificate verification disabled (development mode)",
-                sizeof(f->title)-1);
-        strncpy(f->description,
-                "CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY is enabled. "
-                "The device does not verify TLS server certificates, "
-                "making it vulnerable to MITM attacks on all HTTPS/WSS connections.",
-                sizeof(f->description)-1);
-        strncpy(f->remediation,
-                "Remove CONFIG_ESP_TLS_INSECURE from sdkconfig.defaults "
-                "before deploying to production.",
-                sizeof(f->remediation)-1);
+        snprintf(f->id, sizeof(f->id), "%s", "SELF-TLS-001");
+        snprintf(f->title, sizeof(f->title), "%s", "TLS certificate verification disabled (development mode)");
+        snprintf(f->description, sizeof(f->description), "%s",
+            "CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY is enabled. "
+            "The device does not verify TLS server certificates, "
+            "making it vulnerable to MITM attacks on all HTTPS/WSS connections.");
+        snprintf(f->remediation, sizeof(f->remediation), "%s",
+            "Remove CONFIG_ESP_TLS_INSECURE from sdkconfig.defaults "
+            "before deploying to production.");
     }
 #endif
 
@@ -569,16 +605,15 @@ esp_err_t vuln_reporter_self_assess(vuln_report_t *report)
     if (report->count < MAX_FINDINGS) {
         vuln_finding_t *f = &report->findings[report->count++];
         f->severity = VULN_SEV_INFO;
-        strncpy(f->id, "SELF-VER-001", sizeof(f->id)-1);
+        snprintf(f->id, sizeof(f->id), "%s", "SELF-VER-001");
         snprintf(f->title, sizeof(f->title),
                  "Firmware: ESP-IDF v%d.%d.%d",
                  ESP_IDF_VERSION_MAJOR, ESP_IDF_VERSION_MINOR, ESP_IDF_VERSION_PATCH);
         snprintf(f->description, sizeof(f->description),
                  "Running ESP-IDF v%d.%d.%d. Ensure this is kept up to date.",
                  ESP_IDF_VERSION_MAJOR, ESP_IDF_VERSION_MINOR, ESP_IDF_VERSION_PATCH);
-        strncpy(f->remediation,
-                "Monitor https://github.com/espressif/esp-idf/releases for security patches.",
-                sizeof(f->remediation)-1);
+        snprintf(f->remediation, sizeof(f->remediation), "%s",
+            "Monitor https://github.com/espressif/esp-idf/releases for security patches.");
     }
 
     tally_severities(report);

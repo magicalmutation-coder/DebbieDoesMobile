@@ -2,7 +2,7 @@
 
 > **Debbie** — Your Portable Personal AI Friend on the Freenove Media Kit ESP32-S3
 
-Debbie is a full-featured personal AI companion that lives on the Freenove Media Kit for ESP32-S3 (FNK0102). She can hold voice conversations, see through the camera, read your WhatsApp and email, control Spotify, and connect to your own AI agent.
+Debbie is a full-featured personal AI companion that lives on the Freenove Media Kit for ESP32-S3 (FNK0102). She can hold voice conversations, read your WhatsApp and email, run on-device security scans, and connect to your own AI agent, with setup support for OpenAI and LM Studio providers.
 
 ---
 
@@ -16,17 +16,15 @@ Debbie is a full-featured personal AI companion that lives on the Freenove Media
 │       ╭────────╮         │  💬 Hi! I'm Debbie 😊        │
 │      ( ◉    ◉ )         │                              │
 │      (    ‿    )        │  I can chat, see what my     │
-│       ╰────────╯         │  camera sees, read your      │
-│                          │  messages, and control music.│
+│       ╰────────╯         │  network looks like, read     │
+│                          │  your messages, and help you. │
 │       Ready! 😊          │                              │
 │                          │  Press centre button or      │
 │                          │  just say something!         │
-├──────────────────────────┴──────────────────────────────┤
-│  🎵  Artist — Song Title                      ▶ ⏭      │  ← Spotify
-└─────────────────────────────────────────────────────────┘
+└──────────────────────────┴──────────────────────────────┘
 ```
 
-The face animates — eyes open wide when listening, half-close when thinking, and blink periodically when idle. 😊
+The UI now focuses on practical status and text output: WiFi/AI state, notifications, and setup/network diagnostics.
 
 ---
 
@@ -34,17 +32,35 @@ The face animates — eyes open wide when listening, half-close when thinking, a
 
 | Feature | Description |
 |---------|-------------|
-| 🗣️ **Voice Conversations** | Real-time bidirectional voice via OpenAI Realtime API (gpt-4o-realtime-preview) |
-| 📷 **Camera Vision** | Capture photos; Debbie describes what she sees using gpt-4o vision |
+| 🗣️ **Voice Conversations** | Real-time bidirectional voice via provider-aware runtime (OpenAI Realtime or LM Studio local endpoint) |
+| 📷 **Camera Vision** | OpenAI vision path is available in code, currently runtime-disabled by default on the 3.5" profile until a non-conflicting camera pin map is validated |
 | 💬 **WhatsApp Pager** | Receive WhatsApp messages as notifications on-device |
 | 📧 **Email Monitor** | IMAP email monitoring — important emails pushed to Debbie |
-| 🎵 **Spotify Control** | Play, pause, skip, search tracks by voice command |
+| 🧪 **Local LLM Provider (LM Studio)** | Select LM Studio in setup and auto-detect available local models |
+| ✅ **Provider Model Probe** | `/llm_models` can now query model lists for Ollama, LM Studio, and OpenAI (when API key is configured) |
+| 🔐 **OpenAI Key Guardrails** | Setup now sanitizes pasted OpenAI keys (trims whitespace, strips accidental `Bearer ` prefixes/text) and shows a specific on-device warning when key auth is rejected |
+| 🎵 **Spotify Control** | Temporarily paused in runtime while connectivity and launcher UX are stabilised |
 | 🔔 **Agent Notifications** | Connect to your own AI agent (e.g. D3881E) for custom notifications |
 | ⚙️ **Captive-Portal Setup** | First-run web UI at `192.168.4.1` for easy configuration |
 | 🔋 **Battery Monitor** | Battery percentage shown in status bar |
-| 🌈 **Animated LVGL UI** | Friendly face with expressions, blink animations, status bar |
+| 🌈 **Practical LVGL UI** | Full-width status/text layout with connection indicators and diagnostics |
+| 🎙️ **Speech-ready Boot** | When AI connects, Debbie enters listening-ready mode automatically so speech-to-text starts without extra setup |
+| 🧭 **On-device Launcher Menu** | Three-button navigation for network route help, hotspot setup, scanner, and notifications |
 | 🔄 **Auto-reconnect** | Automatically reconnects to WiFi and AI if connection drops |
+| 🌐 **On-screen Network Info** | Shows AP URL, STA IP, and AI/provider status on the display footer and posts hotspot-route summaries in chat |
 | 📦 **OTA Updates** | Dual-partition layout for over-the-air firmware updates |
+
+---
+
+## 📚 Documentation
+
+- [Bring-up and troubleshooting guide](docs/DEVICE_BRINGUP_AND_TROUBLESHOOTING.md)
+- [Firmware function index](docs/FUNCTION_INDEX.md)
+- [Bluetooth speaker migration path](docs/BLUETOOTH_AUDIO_MIGRATION.md)
+- [External API handoff contract](docs/EXTERNAL_API_HANDOFF.md)
+- [Postman collection for external API](docs/EXTERNAL_API.postman_collection.json)
+- [External API share folder README](external-api-handoff/README.md)
+- [External API Postman environment](external-api-handoff/EXTERNAL_API.postman_environment.json)
 
 ---
 
@@ -60,6 +76,30 @@ The face animates — eyes open wide when listening, half-close when thinking, a
 | **USB Cable** | USB-C for flashing |
 | **WiFi** | 2.4 GHz access point |
 | **PC/Server** | To run the companion server (any machine on the same network) |
+
+---
+
+## 🖥️ Display Driver Profile (FNK0102B 3.5")
+
+The firmware now uses the same core profile as Freenove's LVGL Picture example for the 3.5" panel:
+
+- Driver family: ST7796-compatible panel init (via ESP-IDF ST7789 panel driver + vendor init sequence)
+- SPI host: `SPI2_HOST` (HSPI-equivalent mapping on ESP32-S3)
+- Pins: MOSI=21, SCLK=47, DC=45, RST=20, BL=2, CS=-1
+- Orientation: landscape 480x320 (`swap_xy=true`, `mirror_x=false`, `mirror_y=false`)
+- Inversion: enabled (`invert=true`)
+
+If the screen shows noise or random dots, check the boot log for `display profile:` and verify these values match your board.
+
+Normal runtime uses the full Debbie LVGL interface by default (the temporary `HELLO` panel test mode is disabled).
+
+BLE note: BLE runtime is currently disabled by default in this profile due a reproducible BT stack assert on this hardware/IDF combination. See the troubleshooting guide for details.
+
+Camera note: camera runtime is currently disabled by default on this profile (`DEBBIE_ENABLE_CAMERA_RUNTIME=0`) because the current camera pin map overlaps active display pins and can blank the panel after boot.
+
+WiFi setup note: AP-only to AP+STA transitions are now handled without panic during setup saves (no `ESP_ERR_WIFI_MODE` abort expected on credential apply).
+
+Display runtime note: backlight GPIO is now held high in firmware (`gpio_hold_en`) after panel init to prevent runtime pin-mode interference from blanking the screen.
 
 ---
 
@@ -91,19 +131,21 @@ idf.py -p /dev/ttyUSB0 flash monitor
 ### 2. First-Run Setup
 
 1. After flashing, Debbie creates a WiFi hotspot called **"Debbie"** (no password).
-2. Connect your phone or computer to **"Debbie"**.
+2. Connect your phone or computer to **"Debbie"** for setup.
 3. Open a browser and navigate to **`http://192.168.4.1`**.
 4. Fill in:
-   - Your home WiFi SSID and password
-   - Your [OpenAI API key](https://platform.openai.com/api-keys) (starts with `sk-`)
+   - Your hotspot/home WiFi SSID and password (Debbie joins this as a client for internet access)
+   - LLM provider (`openai` or `lmstudio`)
+   - Model name and local URL for LM Studio (if selected)
+   - Your [OpenAI API key](https://platform.openai.com/api-keys) (starts with `sk-`, required only for OpenAI provider)
    - Companion server URL (optional — see below)
 5. Click **Save & Connect**.
 
-Debbie will reboot, connect to your WiFi, and be ready to chat! 🎉
+Debbie will reboot, connect to your hotspot/WiFi as a client (STA), and be ready to chat on the move. 🎉
 
 ### 3. Set Up the Companion Server (Optional but recommended)
 
-The companion server enables WhatsApp, email, and Spotify integration.
+The companion server enables WhatsApp, email, memory/RAG sync, and custom agent integrations.
 
 ```bash
 cd companion-server
@@ -122,16 +164,28 @@ npm start
 The server runs on port 3001 by default. Enter its URL in Debbie's setup page:
 `ws://YOUR_PC_IP:3001`
 
+External HTTP integration note: companion projects consuming `/api/external/*`
+should send `Authorization: Bearer YOUR_EXTERNAL_API_KEY` on every call.
+See [External API handoff contract](docs/EXTERNAL_API_HANDOFF.md) for endpoint and error contracts.
+
+Share-pack note: the full handoff packet is available in [external-api-handoff](external-api-handoff/README.md) and can be shared as-is with partner projects.
+
 ---
 
 ## ⚙️ Configuration
 
 All settings are stored in flash (NVS) and can be updated via the web UI at `http://192.168.4.1/` (accessible via the Debbie AP, or on your local network at Debbie's IP address).
 
+Settings storage note: configuration is persisted in internal ESP32 NVS flash (not on SD card).
+
 | Setting | Description | Default |
 |---------|-------------|---------|
 | `wifi_ssid` | Your home WiFi network name | — |
 | `wifi_password` | WiFi password | — |
+| `llm_provider` | AI provider (`openai`, `lmstudio`, etc.) | `openai` |
+| `llm_model` | Requested model identifier | `gpt-4o` |
+| `local_llm_url` | Local provider base URL (LM Studio/Ollama style) | `http://192.168.1.100:1234` |
+| `local_llm_model` | Local model name | `llama3` |
 | `openai_api_key` | OpenAI API key (sk-...) | — |
 | `agent_ws_url` | Custom agent WebSocket URL | — |
 | `companion_url` | Companion server WebSocket URL | — |
@@ -139,17 +193,39 @@ All settings are stored in flash (NVS) and can be updated via the web UI at `htt
 | `system_prompt` | Debbie's persona prompt | friendly AI companion |
 | `speaker_volume` | Speaker volume 0–100 | 75 |
 
+Local provider note: `local_llm_url` is normalized on save (trims whitespace/trailing slash and collapses accidental duplicate dots) to avoid malformed host strings breaking realtime connection.
+
+Model probe note: `GET /llm_models?provider=openai` uses the configured OpenAI API key and fetches model IDs directly from OpenAI so you can verify cloud connectivity from the device. Error responses now include upstream detail (for example invalid/unauthorized key) to make setup troubleshooting faster.
+
 ---
 
 ## 🎮 Controls
 
-| Button | Action |
+| Button (right side) | Action |
 |--------|--------|
-| **Centre** | Capture photo + ask Debbie what she sees |
-| **Up** | Volume up |
-| **Down** | Volume down |
-| **Long press** | Read notifications aloud |
+| **Top (mic icon)** | Mic quick action (listen now / AI status prompt) |
+| **Middle (arrow icon)** | Cycle launcher menu items |
+| **Bottom (power icon)** | Open launcher / activate selected item |
+| **Long press** | Read notifications aloud (or show summary if AI is offline) |
 | **Voice** | Just speak naturally — Debbie listens automatically |
+
+Freenove FNK0102 note: center/button input is routed via GPIO19 on this firmware profile. Using GPIO45 for center conflicts with the 3.5" LCD DC pin.
+
+Input note: on this board profile, right-side top/middle/bottom keys are decoded from a resistor-ladder input on GPIO19 (ADC) rather than separate GPIO interrupts.
+
+Button mapping note: this build is tuned for three-button use (top mic, middle joystick select, bottom power/action). In ladder mode, right-lane ADC hits are ignored to reduce accidental false top-button triggers.
+
+Startup note: when AI is connected, Debbie now enters listening-ready state on boot/reconnect and immediately accepts speech input.
+
+Input stack note: when ADC ladder mode is enabled, LVGL keypad GPIO polling is disabled to avoid electrical/configuration interference on GPIO19.
+
+Bluetooth audio note: this ESP32-S3 board path is BLE-only and does not provide classic A2DP speaker output in current firmware, so direct Bluetooth speaker audio output is not available yet.
+
+Setup portal note: when BLE runtime is compiled out on this profile, the Network tab shows a small "BLE runtime off" badge and BLE enable control is locked.
+
+Spotify note: Spotify notification controls are intentionally hidden in setup UI while voice and launcher behavior are being stabilised.
+
+Migration note: see [Bluetooth speaker migration path](docs/BLUETOOTH_AUDIO_MIGRATION.md) for practical hardware options and implementation phases.
 
 ---
 
@@ -160,17 +236,17 @@ All settings are stored in flash (NVS) and can be updated via the web UI at `htt
 │                    Debbie ESP32-S3                           │
 │                                                             │
 │  ┌──────────┐  PCM24k   ┌────────────────────────────────┐ │
-│  │   MEMS   │──────────►│   OpenAI Realtime API (WS)     │ │
-│  │   Mic    │           │   gpt-4o-realtime-preview      │ │
+│  │   MEMS   │──────────►│ LLM Realtime Provider Router   │ │
+│  │   Mic    │           │ OpenAI Realtime / LM Studio    │ │
 │  └──────────┘           └───────────────┬────────────────┘ │
 │                                          │ PCM24k           │
 │  ┌──────────┐                            ▼                  │
-│  │  Camera  │─ JPEG b64 ─► gpt-4o vision HTTP              │
+│  │  Camera  │─ JPEG b64 ─► OpenAI vision HTTP (optional)   │
 │  └──────────┘                                               │
 │                                                             │
 │  ┌──────────┐  WebSocket ┌────────────────────────────────┐ │
 │  │  Display │◄──────────►│  Companion Server (Node.js)    │ │
-│  │  (LVGL)  │  notify    │  WhatsApp │ Email │ Spotify    │ │
+│  │  (LVGL)  │  notify    │  WhatsApp │ Email │ Agent/RAG  │ │
 │  └──────────┘            └────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -180,10 +256,10 @@ All settings are stored in flash (NVS) and can be updated via the web UI at `htt
 | File | Purpose |
 |------|---------|
 | `main/main.c` | App entry, state machine, event routing |
-| `main/openai_client.c` | OpenAI Realtime API + Chat/Vision HTTP |
+| `main/openai_client.c` | Provider-aware realtime client (OpenAI + LM Studio) and OpenAI chat/vision HTTP path |
 | `main/audio_manager.c` | I2S mic capture + speaker playback |
 | `main/camera_manager.c` | OV2640 capture + JPEG/base64 encoding |
-| `main/display_manager.c` | LVGL UI — Debbie's face + status |
+| `main/display_manager.c` | LVGL UI — status, text panel, and diagnostics footer |
 | `main/notification_client.c` | WebSocket client for companion server |
 | `main/wifi_manager.c` | WiFi STA+AP, auto-reconnect |
 | `main/web_server.c` | HTTP config portal + REST API |
@@ -197,7 +273,7 @@ All settings are stored in flash (NVS) and can be updated via the web UI at `htt
 | `server.js` | Express + WebSocket server, device registry |
 | `whatsapp.js` | WhatsApp Web.js integration |
 | `email_monitor.js` | IMAP email polling |
-| `spotify.js` | Spotify Web API controller |
+| `spotify.js` | Spotify Web API controller (runtime paused in current firmware) |
 | `agent_bridge.js` | Custom agent WebSocket bridge |
 
 ---
@@ -306,22 +382,11 @@ If you have your own AI agent (e.g. a custom LLM server), connect it via:
 
 ---
 
-## 🎵 Spotify Setup
+## 🎵 Spotify Status
 
-1. Create a Spotify developer app at https://developer.spotify.com/dashboard
-2. Add redirect URI: `http://localhost:3001/spotify/callback`
-3. Add your Client ID and Secret to `companion-server/.env`
-4. Start the companion server and visit `http://localhost:3001/spotify/auth`
-5. Log in and authorise — copy the refresh token to `.env`
+Spotify integration remains in the companion server and API plumbing for compatibility, but device-side runtime controls are currently paused while core launcher and connectivity flows are stabilised.
 
-**Voice commands:**
-- *"Play some jazz"*
-- *"Skip to the next song"*
-- *"Turn the volume up"*
-- *"What's playing?"*
-- *"Pause the music"*
-
-> **Audible:** Direct Audible API access is not publicly available. However, you can control Audible playback through your phone (it stays on the phone), and Debbie can serve as a voice remote via the companion server.
+If you need mobile audio today, route playback through your phone and keep Debbie focused on conversation, notifications, and network tooling.
 
 ---
 
@@ -342,12 +407,12 @@ connections between conversations.
 
 | Function | GPIO |
 |----------|------|
-| LCD MOSI | 35 |
-| LCD CLK  | 36 |
-| LCD CS   | 34 |
-| LCD DC   | 37 |
-| LCD RST  | 38 |
-| LCD BL   | 33 |
+| LCD MOSI | 21 |
+| LCD CLK  | 47 |
+| LCD CS   | -1 |
+| LCD DC   | 45 |
+| LCD RST  | 20 |
+| LCD BL   | 2 |
 | Mic SCK  | 14 |
 | Mic WS   | 13 |
 | Mic SD   | 12 |
@@ -355,9 +420,11 @@ connections between conversations.
 | Spk LRCK | 16 |
 | Spk DATA | 15 |
 | Cam XCLK | 10 |
-| Nav Centre | 45 |
+| Nav Centre | 19 |
 | Nav Up   | 41 |
 | Nav Down | 42 |
+| Nav Left | 43 (reserved in current profile) |
+| Nav Right | 44 (reserved in current profile) |
 | RGB LED  | 40 |
 | Battery ADC | 4 |
 
@@ -374,6 +441,8 @@ connections between conversations.
 | Can't connect to WiFi | Use 2.4 GHz (not 5 GHz); visit AP for reconfigure |
 | OpenAI errors | Verify API key; check credit balance |
 | No notifications | Ensure companion server is running and URL is correct |
+| Bluetooth speaker output | Not supported on ESP32-S3 BLE-only path (no classic A2DP output) |
+| Top/bottom buttons not responding | Ensure firmware includes ADC key-ladder decode on GPIO19 and that NAV_CENTER remains mapped to GPIO19 |
 | Display blank | Check SPI pins and `DEBBIE_DISPLAY_35` define |
 
 Enable verbose logging:

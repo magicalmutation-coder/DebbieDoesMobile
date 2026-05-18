@@ -51,3 +51,8 @@ void display_manager_set_battery(uint8_t percent);
  * @brief  Update WiFi / AI connection icons in status bar.
  */
 void display_manager_set_connection_status(bool wifi_ok, bool ai_ok);
+
+/**
+ * @brief  Show current network diagnostics text (AP/STA/AI state).
+ */
+void display_manager_set_network_info(const char *info);

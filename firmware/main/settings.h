@@ -17,12 +17,12 @@
 
 /* ── SPI Display (ST7796 / ST7789) ─────────────────────────────────────────*/
 #define LCD_SPI_HOST        SPI2_HOST
-#define LCD_PIN_MOSI        35
-#define LCD_PIN_CLK         36
-#define LCD_PIN_CS          34
-#define LCD_PIN_DC          37
-#define LCD_PIN_RST         38
-#define LCD_PIN_BL          33
+#define LCD_PIN_MOSI        21
+#define LCD_PIN_CLK         47
+#define LCD_PIN_CS          -1
+#define LCD_PIN_DC          45
+#define LCD_PIN_RST         20
+#define LCD_PIN_BL          2
 #define LCD_SPI_FREQ_HZ     (40 * 1000 * 1000)
 
 #if DEBBIE_DISPLAY_35
@@ -52,6 +52,10 @@
 #define CAM_PIN_VSYNC       2
 #define CAM_PIN_HREF        1
 #define CAM_PIN_PCLK        0
+/* Safety switch: current camera pin profile overlaps active display pins
+ * on the 3.5" configuration (including backlight). Keep camera runtime
+ * disabled until a non-conflicting camera pin map is validated. */
+#define DEBBIE_ENABLE_CAMERA_RUNTIME 0
 
 /* ── I2S Microphone (MEMS, e.g. MSM261S4030H0) ─────────────────────────── */
 #define I2S_MIC_PORT        I2S_NUM_0
@@ -81,7 +85,12 @@
 #define NAV_DOWN            42
 #define NAV_LEFT            43
 #define NAV_RIGHT           44
-#define NAV_CENTER          45    /* press to capture image / confirm */
+/* Freenove examples route the key ladder through GPIO19. Using GPIO45 here
+ * conflicts with LCD DC on the 3.5" profile and disables center presses. */
+#define NAV_CENTER          19    /* press to capture image / confirm */
+/* FNK0102 uses an ADC resistor ladder for right-side top/middle/bottom input
+ * on GPIO19. Keep this enabled for reliable button decoding. */
+#define DEBBIE_USE_ADC_NAV_LADDER 1
 
 /* ── Battery ADC ────────────────────────────────────────────────────────── */
 #define BAT_ADC_PIN         4     /* ADC1_CH3 — check your board variant */
@@ -100,7 +109,11 @@
 
 /* ── Bluetooth defaults ─────────────────────────────────────────────────── */
 #define DEBBIE_BLE_DEVICE_NAME  "Debbie"
-#define DEBBIE_BLE_DEFAULT_ON   true
+#define DEBBIE_BLE_DEFAULT_ON   false
+/* Temporary safety switch: BLE init currently triggers a bt_workqueue assert
+ * on this hardware/IDF combination. Keep disabled until BLE stack stability
+ * is verified, then set back to 1. */
+#define DEBBIE_ENABLE_BLE_RUNTIME 0
 
 /* ── OpenAI ─────────────────────────────────────────────────────────────── */
 #define OPENAI_REALTIME_HOST   "api.openai.com"
@@ -111,7 +124,13 @@
 
 /* ── Local LLM defaults (Ollama / LM Studio) ───────────────────────────── */
 #define LOCAL_LLM_DEFAULT_URL   "http://192.168.1.100:11434"
+#define LOCAL_LMSTUDIO_DEFAULT_URL "http://192.168.1.100:1234"
 #define LOCAL_LLM_DEFAULT_MODEL "llama3"
+
+/* ── Runtime feature gates ───────────────────────────────────────────────── */
+/* Spotify control is temporarily disabled while core connectivity + UI
+ * routing are being stabilised. Keep config keys for compatibility. */
+#define DEBBIE_ENABLE_SPOTIFY_RUNTIME 0
 
 /* ── Agent / companion server defaults ──────────────────────────────────── */
 #define AGENT_WS_DEFAULT_URL   "ws://YOUR_COMPANION_SERVER:3001"
@@ -148,7 +167,7 @@
     "• Voice conversations (just talk to me!)\n" \
     "• Camera vision — ask me to look at something\n" \
     "• Reading WhatsApp messages and emails\n" \
-    "• Controlling Spotify music playback\n" \
+    "• On-device network tools and diagnostics\n" \
     "• Fetching information from the internet\n" \
     "• Network security scanning (say 'scan my network')\n" \
     "  - Discovering all devices on the local network\n" \

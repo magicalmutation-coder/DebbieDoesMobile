@@ -7,11 +7,153 @@
 #include "memory_manager.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
+#include "esp_http_client.h"
 #include "cJSON.h"
 #include <string.h>
 #include <stdlib.h>
 
 static const char *TAG = "web";
+
+#ifndef DEBBIE_OPENAI_API_KEY_OVERRIDE
+#define DEBBIE_OPENAI_API_KEY_OVERRIDE ""
+#endif
+
+static void trim_ascii_whitespace(char *s)
+{
+    if (!s) {
+        return;
+    }
+
+    char *start = s;
+    while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n') {
+        start++;
+    }
+
+    if (start != s) {
+        memmove(s, start, strlen(start) + 1);
+    }
+
+    size_t len = strlen(s);
+    while (len > 0) {
+        char ch = s[len - 1];
+        if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
+            s[--len] = '\0';
+        } else {
+            break;
+        }
+    }
+}
+
+static void collapse_duplicate_dots(char *s)
+{
+    if (!s || !s[0]) {
+        return;
+    }
+
+    char *src = s;
+    char *dst = s;
+    char prev = '\0';
+
+    while (*src) {
+        char ch = *src++;
+        if (ch == '.' && prev == '.') {
+            continue;
+        }
+        *dst++ = ch;
+        prev = ch;
+    }
+    *dst = '\0';
+}
+
+static void trim_trailing_slashes(char *s)
+{
+    if (!s) {
+        return;
+    }
+    size_t len = strlen(s);
+    while (len > 0 && s[len - 1] == '/') {
+        s[--len] = '\0';
+    }
+}
+
+static void sanitize_local_llm_url(char *s)
+{
+    if (!s) {
+        return;
+    }
+    trim_ascii_whitespace(s);
+    collapse_duplicate_dots(s);
+    trim_trailing_slashes(s);
+}
+
+static void sanitize_openai_api_key(char *s)
+{
+    if (!s) {
+        return;
+    }
+
+    trim_ascii_whitespace(s);
+    if (!s[0]) {
+        return;
+    }
+
+    if (strncmp(s, "Bearer ", 7) == 0 || strncmp(s, "bearer ", 7) == 0) {
+        memmove(s, s + 7, strlen(s + 7) + 1);
+        trim_ascii_whitespace(s);
+    }
+
+    char *sk = strstr(s, "sk-");
+    if (sk && sk != s) {
+        memmove(s, sk, strlen(sk) + 1);
+    }
+
+    for (size_t i = 0; s[i]; ++i) {
+        char ch = s[i];
+        if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' ||
+            ch == '"' || ch == '\'' || ch == ',' || ch == ';') {
+            s[i] = '\0';
+            break;
+        }
+    }
+
+    trim_ascii_whitespace(s);
+}
+
+static void extract_error_detail(const char *body, char *out, size_t out_sz)
+{
+    if (!out || out_sz == 0) {
+        return;
+    }
+    out[0] = '\0';
+
+    if (!body || !body[0]) {
+        return;
+    }
+
+    cJSON *json = cJSON_Parse(body);
+    if (json) {
+        cJSON *err = cJSON_GetObjectItem(json, "error");
+        cJSON *msg = err ? cJSON_GetObjectItem(err, "message") : NULL;
+        if (msg && cJSON_IsString(msg) && msg->valuestring) {
+            snprintf(out, out_sz, "%s", msg->valuestring);
+        }
+        cJSON_Delete(json);
+    }
+
+    if (!out[0]) {
+        size_t i = 0;
+        while (body[i] && i < out_sz - 1) {
+            char ch = body[i++];
+            if (ch == '\r' || ch == '\n') {
+                ch = ' ';
+            }
+            out[i - 1] = ch;
+        }
+        out[i] = '\0';
+    }
+
+    trim_ascii_whitespace(out);
+}
 
 /* --------------------------------------------------------------------------
  * Full configuration portal — tabbed single-page app
@@ -37,6 +179,8 @@ static const char SETUP_HTML[] =
 "white-space:nowrap;border-bottom:3px solid transparent;transition:.2s}"
 ".tab.active{color:#06d6a0;border-bottom-color:#06d6a0;font-weight:600}"
 ".tab:hover{color:#eee}"
+".tab-note{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;"
+"font-size:.66rem;line-height:1.2;background:#3a0d0d;color:#ff9aa2;border:1px solid #6a1f26}"
 
 /* Content */
 ".page{display:none;padding:0 12px 80px}"
@@ -103,7 +247,11 @@ static const char SETUP_HTML[] =
 
 /* Tab bar */
 "<div class='tabs'>"
+#if DEBBIE_ENABLE_BLE_RUNTIME
 "<div class='tab active' onclick='showTab(0)'>📶 Network</div>"
+#else
+"<div class='tab active' onclick='showTab(0)'>📶 Network <span class='tab-note'>BLE runtime off</span></div>"
+#endif
 "<div class='tab' onclick='showTab(1)'>🤖 AI & LLM</div>"
 "<div class='tab' onclick='showTab(2)'>🎀 Personality</div>"
 "<div class='tab' onclick='showTab(3)'>🔔 Notifications</div>"
@@ -135,24 +283,32 @@ static const char SETUP_HTML[] =
 "<div class='card-title'>🔵 Bluetooth (BLE)</div>"
 "<p style='font-size:.8rem;color:#777;margin-bottom:12px'>"
 "BLE lets you configure Debbie wirelessly from any phone using a "
-"BLE Serial app (e.g. nRF Toolbox, Serial Bluetooth Terminal) — "
-"no WiFi setup required. Send JSON config commands to the Nordic UART Service.</p>"
+"BLE Serial app (e.g. nRF Toolbox, Serial Bluetooth Terminal). "
+"This board path does not support classic Bluetooth A2DP speaker output.</p>"
 "<div class='toggle-row'>"
 "<div><div class='toggle-label'>Enable Bluetooth</div>"
 "<div class='toggle-sub'>BLE advertising · Nordic UART Service</div></div>"
+/* BLE runtime can be compiled out on this hardware profile. Keep the
+ * setting visible but locked in the setup UI to avoid user confusion. */
+#if DEBBIE_ENABLE_BLE_RUNTIME
 "<label class='switch'><input type='checkbox' id='bt_en'>"
 "<span class='slider'></span></label></div>"
+#else
+"<label class='switch'><input type='checkbox' id='bt_en' disabled>"
+"<span class='slider'></span></label></div>"
+#endif
 "<br>"
 "<label>BLE Device Name</label>"
 "<input id='ble_name' placeholder='Debbie'>"
-"<p class='hint'>Name shown when scanning for BLE devices on your phone.</p>"
+"<p class='hint'>Name shown when scanning for BLE devices on your phone. "
+"Bluetooth speaker audio output is not available in this firmware profile.</p>"
 "</div>"
 
 "<div class='card'>"
 "<div class='card-title'>📡 Companion Server</div>"
 "<label>Companion Server URL</label>"
 "<input id='companion_url' placeholder='ws://192.168.1.10:3001'>"
-"<p class='hint'>Node.js companion server for WhatsApp, Email, Spotify &amp; agent tools.</p>"
+"<p class='hint'>Node.js companion server for WhatsApp, Email, memory/RAG, and agent tools.</p>"
 "</div>"
 
 "</div>"
@@ -181,6 +337,9 @@ static const char SETUP_HTML[] =
 "<div class='llm-card' id='pcard_ollama' onclick='selectProvider(\"ollama\")'>"
 "<div class='llm-icon'>🏠</div><div class='llm-name'>Ollama</div>"
 "<div class='llm-desc'>Local · private</div></div>"
+"<div class='llm-card' id='pcard_lmstudio' onclick='selectProvider(\"lmstudio\")'>"
+"<div class='llm-icon'>🧪</div><div class='llm-name'>LM Studio</div>"
+"<div class='llm-desc'>Local API · desktop</div></div>"
 "</div>"
 "<input type='hidden' id='llm_provider' value='openai'>"
 "</div>"
@@ -240,8 +399,11 @@ static const char SETUP_HTML[] =
 "<input id='local_llm_url' placeholder='http://192.168.1.100:11434'>"
 "<p class='hint'>Ollama default: http://&lt;your-PC-IP&gt;:11434 &nbsp;|&nbsp; LM Studio: http://&lt;your-PC-IP&gt;:1234</p>"
 "<label>Model Name</label>"
-"<input id='local_llm_model' placeholder='llama3'>"
-"<p class='hint'>Run <code style='color:#06d6a0'>ollama list</code> to see installed models. "
+"<input id='local_llm_model' list='local_model_list' placeholder='llama3'>"
+"<datalist id='local_model_list'></datalist>"
+"<button class='btn-save' style='width:auto;padding:8px 14px;font-size:.78rem' onclick='refreshLocalModels()'>🔄 Detect Models</button>"
+"<div id='local_model_status' class='hint' style='margin-top:6px'>Use Detect Models to auto-load available local models.</div>"
+"<p class='hint' id='local_llm_hint'>Run <code style='color:#06d6a0'>ollama list</code> to see installed models. "
 "Examples: llama3, mistral, phi3, gemma2, qwen2.5</p>"
 "</div>"
 
@@ -320,11 +482,7 @@ static const char SETUP_HTML[] =
 "<div class='toggle-sub'>Unread emails via companion server</div></div>"
 "<label class='switch'><input type='checkbox' id='notif_em' checked>"
 "<span class='slider'></span></label></div>"
-"<div class='toggle-row'>"
-"<div><div class='toggle-label'>🎵 Spotify</div>"
-"<div class='toggle-sub'>Now playing &amp; playback controls</div></div>"
-"<label class='switch'><input type='checkbox' id='notif_sp' checked>"
-"<span class='slider'></span></label></div>"
+"<p class='hint'>Spotify controls are intentionally hidden in this build while voice + launcher behaviour is being stabilised.</p>"
 "</div>"
 "</div>"
 
@@ -420,22 +578,71 @@ static const char SETUP_HTML[] =
 
 "<script>"
 /* ── Provider selection ─── */
-"var PROVIDERS=['openai','anthropic','groq','openrouter','ollama'];"
+"var PROVIDERS=['openai','anthropic','groq','openrouter','ollama','lmstudio'];"
 "var MODELS={"
 " openai:'gpt-4o',"
 " anthropic:'claude-3-5-sonnet-20241022',"
 " groq:'llama-3.3-70b-versatile',"
 " openrouter:'',"
-" ollama:'llama3'"
+" ollama:'llama3',"
+" lmstudio:'local-model'"
 "};"
+"function setLocalHints(p){"
+" var hint=document.getElementById('local_llm_hint');"
+" var url=document.getElementById('local_llm_url');"
+" if(!hint||!url)return;"
+" if(p==='lmstudio'){"
+"  if(!url.value)url.value='" LOCAL_LMSTUDIO_DEFAULT_URL "';"
+"  hint.innerHTML='LM Studio API server usually runs on port 1234. Click Detect Models to auto-discover.';"
+" } else {"
+"  if(!url.value)url.value='" LOCAL_LLM_DEFAULT_URL "';"
+"  hint.innerHTML='Run <code style=\"color:#06d6a0\">ollama list</code> to see installed models. Examples: llama3, mistral, phi3, gemma2, qwen2.5';"
+" }"
+"}"
+"function setLocalModelStatus(msg,isErr){"
+" var el=document.getElementById('local_model_status');"
+" if(!el)return;"
+" el.style.color=isErr?'#e74c3c':'#777';"
+" el.textContent=msg;"
+"}"
+"function refreshLocalModels(){"
+" var p=g('llm_provider');"
+" if(p!=='ollama'&&p!=='lmstudio')return;"
+" var base=g('local_llm_url');"
+" if(!base){setLocalModelStatus('Set local server URL first.',true);return;}"
+" setLocalModelStatus('Detecting models...',false);"
+" fetch('/llm_models?provider='+encodeURIComponent(p)+'&url='+encodeURIComponent(base))"
+" .then(function(r){return r.json();})"
+" .then(function(j){"
+"  if(!j.ok){setLocalModelStatus(j.msg||'Detect failed',true);return;}"
+"  var dl=document.getElementById('local_model_list');"
+"  if(dl){"
+"   dl.innerHTML='';"
+"   (j.models||[]).forEach(function(m){"
+"    var opt=document.createElement('option');"
+"    opt.value=m;"
+"    dl.appendChild(opt);"
+"   });"
+"  }"
+"  if((!g('local_llm_model'))&&(j.models||[]).length>0){"
+"   s('local_llm_model',j.models[0]);"
+"  }"
+"  setLocalModelStatus('Found '+((j.models||[]).length)+' model(s).',false);"
+" })"
+" .catch(function(e){setLocalModelStatus('Detect failed: '+e,true);});"
+"}"
 "function selectProvider(p){"
+" var isLocal=(p==='ollama'||p==='lmstudio');"
 " PROVIDERS.forEach(function(x){"
 "  var c=document.getElementById('pcard_'+x);"
 "  if(c)c.className='llm-card'+(x===p?' sel':'');"
 "  var d=document.getElementById('card_'+x);"
 "  if(d)d.style.display=(x===p?'':'none');"
 " });"
+" var localCard=document.getElementById('card_ollama');"
+" if(localCard)localCard.style.display=(isLocal?'':'none');"
 " document.getElementById('llm_provider').value=p;"
+" if(isLocal){setLocalHints(p);refreshLocalModels();}"
 "}"
 
 /* ── Tab switching ─── */
@@ -461,7 +668,7 @@ static const char SETUP_HTML[] =
 " if(p==='anthropic')return g('anthropic_model');"
 " if(p==='groq')return g('groq_model');"
 " if(p==='openrouter')return g('or_model');"
-" if(p==='ollama')return g('local_llm_model');"
+" if(p==='ollama'||p==='lmstudio')return g('local_llm_model');"
 " return '';"
 "}"
 
@@ -544,9 +751,11 @@ static const char SETUP_HTML[] =
 "   s('anthropic_model',j.llm_model);"
 "   s('groq_model',j.llm_model);"
 "   s('or_model',j.llm_model);"
-"   s('local_llm_model',j.llm_model);"
 "  }"
+"  if(j.local_llm_model){s('local_llm_model',j.local_llm_model);}"
+"  else if(j.llm_provider==='ollama'||j.llm_provider==='lmstudio'){s('local_llm_model',j.llm_model||'');}"
 "  if(j.local_llm_url)s('local_llm_url',j.local_llm_url);"
+"  if(j.llm_provider==='ollama'||j.llm_provider==='lmstudio'){setLocalHints(j.llm_provider);refreshLocalModels();}"
 "  if(j.agent_url)s('agent_url',j.agent_url);"
 "  sc('use_agent',j.use_agent);"
 "  if(j.name)s('name',j.name);"
@@ -609,6 +818,7 @@ static esp_err_t handler_status(httpd_req_t *req)
     cJSON_AddStringToObject(json, "llm_provider", g_debbie_config.llm_provider);
     cJSON_AddStringToObject(json, "llm_model",    g_debbie_config.llm_model);
     cJSON_AddStringToObject(json, "local_llm_url",g_debbie_config.local_llm_url);
+    cJSON_AddStringToObject(json, "local_llm_model", g_debbie_config.local_llm_model);
     cJSON_AddStringToObject(json, "ssid",         g_debbie_config.wifi_ssid);
     cJSON_AddStringToObject(json, "ssid2",        g_debbie_config.wifi_ssid2);
     cJSON_AddStringToObject(json, "ssid3",        g_debbie_config.wifi_ssid3);
@@ -618,13 +828,22 @@ static esp_err_t handler_status(httpd_req_t *req)
     cJSON_AddNumberToObject(json, "volume",       g_debbie_config.speaker_volume);
     cJSON_AddNumberToObject(json, "vad_threshold",g_debbie_config.vad_threshold);
     cJSON_AddBoolToObject(json,   "wifi_ok",      wifi_manager_is_connected());
+#if DEBBIE_ENABLE_BLE_RUNTIME
     cJSON_AddBoolToObject(json,   "bt_en",        g_debbie_config.bluetooth_enabled);
     cJSON_AddBoolToObject(json,   "bt_on",        g_debbie_config.bluetooth_enabled);
+#else
+    cJSON_AddBoolToObject(json,   "bt_en",        false);
+    cJSON_AddBoolToObject(json,   "bt_on",        false);
+#endif
     cJSON_AddBoolToObject(json,   "use_agent",    g_debbie_config.use_custom_agent);
     cJSON_AddBoolToObject(json,   "notifs_en",    g_debbie_config.notifications_enabled);
     cJSON_AddBoolToObject(json,   "notif_wa",     g_debbie_config.notif_whatsapp);
     cJSON_AddBoolToObject(json,   "notif_em",     g_debbie_config.notif_email);
+#if DEBBIE_ENABLE_SPOTIFY_RUNTIME
     cJSON_AddBoolToObject(json,   "notif_sp",     g_debbie_config.notif_spotify);
+#else
+    cJSON_AddBoolToObject(json,   "notif_sp",     false);
+#endif
     cJSON_AddBoolToObject(json,   "cam_en",       g_debbie_config.camera_enabled);
     cJSON_AddBoolToObject(json,   "mem_en",       g_debbie_config.memory_enabled);
     cJSON_AddBoolToObject(json,   "mem_rag",      g_debbie_config.memory_rag_enabled);
@@ -676,7 +895,11 @@ static esp_err_t handler_configure(httpd_req_t *req)
     GET_STR("pass3",         g_debbie_config.wifi_password3);
     GET_STR("ble_name",      g_debbie_config.ble_device_name);
     GET_STR("companion_url", g_debbie_config.companion_url);
+#if DEBBIE_ENABLE_BLE_RUNTIME
     GET_BOOL("bt_en",        g_debbie_config.bluetooth_enabled);
+#else
+    g_debbie_config.bluetooth_enabled = false;
+#endif
 
     /* LLM */
     GET_STR("llm_provider",  g_debbie_config.llm_provider);
@@ -690,6 +913,30 @@ static esp_err_t handler_configure(httpd_req_t *req)
     GET_STR("agent_url",     g_debbie_config.agent_ws_url);
     GET_BOOL("use_agent",    g_debbie_config.use_custom_agent);
 
+    trim_ascii_whitespace(g_debbie_config.llm_provider);
+    trim_ascii_whitespace(g_debbie_config.llm_model);
+    trim_ascii_whitespace(g_debbie_config.local_llm_model);
+    sanitize_openai_api_key(g_debbie_config.openai_api_key);
+    sanitize_local_llm_url(g_debbie_config.local_llm_url);
+
+    bool is_ollama = strcmp(g_debbie_config.llm_provider, LLM_PROVIDER_OLLAMA) == 0;
+    bool is_lmstudio = strcmp(g_debbie_config.llm_provider, LLM_PROVIDER_LMSTUDIO) == 0;
+    if (is_ollama || is_lmstudio) {
+        if (!g_debbie_config.local_llm_url[0]) {
+            snprintf(g_debbie_config.local_llm_url,
+                     sizeof(g_debbie_config.local_llm_url),
+                     "%s",
+                     is_lmstudio ? LOCAL_LMSTUDIO_DEFAULT_URL : LOCAL_LLM_DEFAULT_URL);
+        }
+        sanitize_local_llm_url(g_debbie_config.local_llm_url);
+        if (!g_debbie_config.local_llm_model[0]) {
+            snprintf(g_debbie_config.local_llm_model,
+                     sizeof(g_debbie_config.local_llm_model),
+                     "%s",
+                     LOCAL_LLM_DEFAULT_MODEL);
+        }
+    }
+
     /* Personality */
     GET_STR("name",          g_debbie_config.debbie_name);
     GET_STR("sys_prompt",    g_debbie_config.system_prompt);
@@ -700,7 +947,11 @@ static esp_err_t handler_configure(httpd_req_t *req)
     GET_BOOL("notifs_en",    g_debbie_config.notifications_enabled);
     GET_BOOL("notif_wa",     g_debbie_config.notif_whatsapp);
     GET_BOOL("notif_em",     g_debbie_config.notif_email);
+#if DEBBIE_ENABLE_SPOTIFY_RUNTIME
     GET_BOOL("notif_sp",     g_debbie_config.notif_spotify);
+#else
+    g_debbie_config.notif_spotify = false;
+#endif
 
     /* Advanced */
     cJSON *vol = cJSON_GetObjectItem(json, "volume");
@@ -763,6 +1014,168 @@ static esp_err_t handler_snapshot(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t handler_llm_models(httpd_req_t *req)
+{
+    char query[320] = { 0 };
+    char provider[32] = { 0 };
+    char base_url[256] = { 0 };
+
+    size_t qlen = httpd_req_get_url_query_len(req);
+    if (qlen > 0 && qlen < sizeof(query)) {
+        if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+            httpd_query_key_value(query, "provider", provider, sizeof(provider));
+            httpd_query_key_value(query, "url", base_url, sizeof(base_url));
+        }
+    }
+
+    if (!provider[0]) {
+        snprintf(provider, sizeof(provider), "%s", g_debbie_config.llm_provider);
+    }
+
+    bool is_ollama   = strcmp(provider, LLM_PROVIDER_OLLAMA) == 0;
+    bool is_lmstudio = strcmp(provider, LLM_PROVIDER_LMSTUDIO) == 0;
+    bool is_openai   = strcmp(provider, LLM_PROVIDER_OPENAI) == 0;
+    if (!is_ollama && !is_lmstudio && !is_openai) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"provider must be ollama, lmstudio, or openai\"}");
+        return ESP_OK;
+    }
+
+    char endpoint[320];
+    if (is_openai) {
+        const char *openai_api_key = DEBBIE_OPENAI_API_KEY_OVERRIDE[0]
+                                   ? DEBBIE_OPENAI_API_KEY_OVERRIDE
+                                   : g_debbie_config.openai_api_key;
+        if (!openai_api_key[0]) {
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"openai_api_key not configured\"}");
+            return ESP_OK;
+        }
+        snprintf(endpoint, sizeof(endpoint), "https://%s/v1/models", OPENAI_CHAT_HOST);
+    } else {
+        if (!base_url[0]) {
+            const char *fallback = g_debbie_config.local_llm_url[0]
+                                 ? g_debbie_config.local_llm_url
+                                 : (is_lmstudio ? LOCAL_LMSTUDIO_DEFAULT_URL : LOCAL_LLM_DEFAULT_URL);
+            snprintf(base_url, sizeof(base_url), "%s", fallback);
+        }
+        sanitize_local_llm_url(base_url);
+        snprintf(endpoint, sizeof(endpoint), "%s%s", base_url,
+                 is_ollama ? "/api/tags" : "/v1/models");
+    }
+
+    esp_http_client_config_t cfg = {
+        .url = endpoint,
+        .timeout_ms = 7000,
+        .skip_cert_common_name_check = true,
+    };
+    if (is_openai) {
+        /* Development profile: use insecure TLS settings from sdkconfig. */
+        cfg.skip_cert_common_name_check = true;
+    }
+    esp_http_client_handle_t cli = esp_http_client_init(&cfg);
+    if (!cli) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"failed to init HTTP client\"}");
+        return ESP_OK;
+    }
+
+    if (is_openai) {
+        const char *openai_api_key = DEBBIE_OPENAI_API_KEY_OVERRIDE[0]
+                                   ? DEBBIE_OPENAI_API_KEY_OVERRIDE
+                                   : g_debbie_config.openai_api_key;
+        char auth[192];
+        snprintf(auth, sizeof(auth), "Bearer %s", openai_api_key);
+        esp_http_client_set_header(cli, "Authorization", auth);
+        esp_http_client_set_header(cli, "Accept", "application/json");
+    }
+
+    esp_err_t err = esp_http_client_perform(cli);
+    int status = esp_http_client_get_status_code(cli);
+    int content_len = esp_http_client_get_content_length(cli);
+    int body_cap = (content_len > 0 && content_len < 65535) ? (content_len + 1) : 65536;
+    char *body = malloc(body_cap);
+    int body_len = 0;
+    if (body) {
+        body_len = esp_http_client_read_response(cli, body, body_cap - 1);
+        if (body_len < 0) body_len = 0;
+        body[body_len] = '\0';
+    }
+    esp_http_client_cleanup(cli);
+
+    if (err != ESP_OK || status < 200 || status >= 300 || !body) {
+        char detail[224] = { 0 };
+        if (body) {
+            extract_error_detail(body, detail, sizeof(detail));
+            free(body);
+        }
+
+        cJSON *fail = cJSON_CreateObject();
+        cJSON_AddBoolToObject(fail, "ok", false);
+        cJSON_AddStringToObject(fail, "msg", "model query failed");
+        cJSON_AddNumberToObject(fail, "status", status);
+        cJSON_AddStringToObject(fail, "source", endpoint);
+        if (err != ESP_OK) {
+            cJSON_AddStringToObject(fail, "error", esp_err_to_name(err));
+        }
+        if (detail[0]) {
+            cJSON_AddStringToObject(fail, "detail", detail);
+        }
+
+        char *resp = cJSON_PrintUnformatted(fail);
+        cJSON_Delete(fail);
+
+        httpd_resp_set_type(req, "application/json");
+        if (resp) {
+            httpd_resp_send(req, resp, strlen(resp));
+            free(resp);
+        } else {
+            httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"model query failed\"}");
+        }
+        return ESP_OK;
+    }
+
+    cJSON *raw = cJSON_Parse(body);
+    free(body);
+    if (!raw) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"invalid model response JSON\"}");
+        return ESP_OK;
+    }
+
+    cJSON *models = cJSON_CreateArray();
+    cJSON *src = cJSON_GetObjectItem(raw, is_ollama ? "models" : "data");
+    if (src && cJSON_IsArray(src)) {
+        cJSON *item = NULL;
+        cJSON_ArrayForEach(item, src) {
+            cJSON *name = cJSON_GetObjectItem(item, is_ollama ? "name" : "id");
+            if (name && cJSON_IsString(name) && name->valuestring && name->valuestring[0]) {
+                cJSON_AddItemToArray(models, cJSON_CreateString(name->valuestring));
+            }
+        }
+    }
+
+    cJSON *out = cJSON_CreateObject();
+    cJSON_AddBoolToObject(out, "ok", true);
+    cJSON_AddStringToObject(out, "provider", provider);
+    cJSON_AddStringToObject(out, "source", endpoint);
+    cJSON_AddNumberToObject(out, "count", cJSON_GetArraySize(models));
+    cJSON_AddItemToObject(out, "models", models);
+
+    char *resp = cJSON_PrintUnformatted(out);
+    cJSON_Delete(out);
+    cJSON_Delete(raw);
+
+    httpd_resp_set_type(req, "application/json");
+    if (resp) {
+        httpd_resp_send(req, resp, strlen(resp));
+        free(resp);
+    } else {
+        httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"serialization failed\"}");
+    }
+    return ESP_OK;
+}
+
 static esp_err_t handler_memory_stats(httpd_req_t *req)
 {
     int fact_count = 0;
@@ -809,6 +1222,7 @@ esp_err_t web_server_start(void)
         { .uri = "/configure",    .method = HTTP_POST,   .handler = handler_configure     },
         { .uri = "/reset",        .method = HTTP_POST,   .handler = handler_reset         },
         { .uri = "/snapshot",     .method = HTTP_GET,    .handler = handler_snapshot      },
+        { .uri = "/llm_models",   .method = HTTP_GET,    .handler = handler_llm_models    },
         { .uri = "/memory_stats", .method = HTTP_GET,    .handler = handler_memory_stats  },
         { .uri = "/memory_clear", .method = HTTP_POST,   .handler = handler_memory_clear  },
     };

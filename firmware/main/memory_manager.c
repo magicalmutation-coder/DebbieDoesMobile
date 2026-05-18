@@ -99,10 +99,8 @@ static void nvs_read_facts(nvs_handle_t nvs)
         cJSON *imp = cJSON_GetObjectItem(j, "i");
         cJSON *ts  = cJSON_GetObjectItem(j, "t");
         if (k && v && cJSON_IsString(k) && cJSON_IsString(v)) {
-            strncpy(s_facts[s_fact_count].key,   k->valuestring,
-                    sizeof(s_facts[s_fact_count].key) - 1);
-            strncpy(s_facts[s_fact_count].value, v->valuestring,
-                    sizeof(s_facts[s_fact_count].value) - 1);
+                snprintf(s_facts[s_fact_count].key, sizeof(s_facts[s_fact_count].key), "%s", k->valuestring);
+                snprintf(s_facts[s_fact_count].value, sizeof(s_facts[s_fact_count].value), "%s", v->valuestring);
             s_facts[s_fact_count].importance    = imp ? (uint8_t)imp->valuedouble : 5;
             s_facts[s_fact_count].timestamp_ms  = ts  ? (int64_t)ts->valuedouble  : 0;
             s_fact_count++;
@@ -131,10 +129,8 @@ static void nvs_read_turns(nvs_handle_t nvs)
         cJSON *t  = cJSON_GetObjectItem(j, "t");
         cJSON *ts = cJSON_GetObjectItem(j, "s");
         if (r && t && cJSON_IsString(r) && cJSON_IsString(t)) {
-            strncpy(s_turns[s_turn_head].role, r->valuestring,
-                    sizeof(s_turns[s_turn_head].role) - 1);
-            strncpy(s_turns[s_turn_head].text, t->valuestring,
-                    sizeof(s_turns[s_turn_head].text) - 1);
+                snprintf(s_turns[s_turn_head].role, sizeof(s_turns[s_turn_head].role), "%s", r->valuestring);
+                snprintf(s_turns[s_turn_head].text, sizeof(s_turns[s_turn_head].text), "%s", t->valuestring);
             s_turns[s_turn_head].timestamp_ms = ts ? (int64_t)ts->valuedouble : 0;
             s_turn_head = (s_turn_head + 1) % MEMORY_MAX_TURNS;
             s_turn_count++;
@@ -221,17 +217,43 @@ static char *http_get(const char *url, int max_bytes)
 }
 
 /* Build HTTP companion URL from base (ws://... or http://...) + path */
+static void append_url_part(char *dst, size_t dst_sz, const char *src)
+{
+    if (!dst || dst_sz == 0 || !src || !src[0]) {
+        return;
+    }
+    size_t used = strlen(dst);
+    if (used >= dst_sz - 1) {
+        return;
+    }
+    strncat(dst, src, dst_sz - used - 1);
+}
+
 static void make_companion_url(char *out, size_t out_sz, const char *path)
 {
+    if (!out || out_sz == 0) {
+        return;
+    }
+
+    out[0] = '\0';
+
     /* companion_url may be ws:// or http:// — normalise to http:// */
     const char *base = g_debbie_config.companion_url;
-    if (strncmp(base, "ws://", 5) == 0) {
-        snprintf(out, out_sz, "http://%s%s", base + 5, path);
-    } else if (strncmp(base, "wss://", 6) == 0) {
-        snprintf(out, out_sz, "https://%s%s", base + 6, path);
-    } else {
-        snprintf(out, out_sz, "%s%s", base, path);
+    if (!base || !base[0]) {
+        return;
     }
+
+    if (strncmp(base, "ws://", 5) == 0) {
+        snprintf(out, out_sz, "http://");
+        append_url_part(out, out_sz, base + 5);
+    } else if (strncmp(base, "wss://", 6) == 0) {
+        snprintf(out, out_sz, "https://");
+        append_url_part(out, out_sz, base + 6);
+    } else {
+        snprintf(out, out_sz, "%s", base);
+    }
+
+    append_url_part(out, out_sz, path);
 }
 
 /* ── Public API ──────────────────────────────────────────────────────────── */
@@ -305,8 +327,8 @@ void memory_manager_add_turn(const char *role, const char *text)
     if (!role || !text || strlen(text) == 0) return;
 
     memory_turn_t *slot = &s_turns[s_turn_head];
-    strncpy(slot->role, role, sizeof(slot->role) - 1);
-    strncpy(slot->text, text, sizeof(slot->text) - 1);
+    snprintf(slot->role, sizeof(slot->role), "%s", role);
+    snprintf(slot->text, sizeof(slot->text), "%s", text);
     slot->text[sizeof(slot->text) - 1] = '\0';
     slot->timestamp_ms = (int64_t)(esp_timer_get_time() / 1000);
 
@@ -331,7 +353,7 @@ esp_err_t memory_manager_save_fact(const char *key,
     /* Update existing fact if key matches */
     for (int i = 0; i < s_fact_count; i++) {
         if (strcmp(s_facts[i].key, key) == 0) {
-            strncpy(s_facts[i].value, value, sizeof(s_facts[i].value) - 1);
+            snprintf(s_facts[i].value, sizeof(s_facts[i].value), "%s", value);
             s_facts[i].importance   = importance;
             s_facts[i].timestamp_ms = (int64_t)(esp_timer_get_time() / 1000);
             ESP_LOGI(TAG, "Updated fact: %s = %s", key, value);
@@ -352,8 +374,8 @@ esp_err_t memory_manager_save_fact(const char *key,
         s_fact_count--;
     }
 
-    strncpy(s_facts[s_fact_count].key,   key,   sizeof(s_facts[s_fact_count].key)   - 1);
-    strncpy(s_facts[s_fact_count].value, value, sizeof(s_facts[s_fact_count].value) - 1);
+    snprintf(s_facts[s_fact_count].key, sizeof(s_facts[s_fact_count].key), "%s", key);
+    snprintf(s_facts[s_fact_count].value, sizeof(s_facts[s_fact_count].value), "%s", value);
     s_facts[s_fact_count].importance   = importance;
     s_facts[s_fact_count].timestamp_ms = (int64_t)(esp_timer_get_time() / 1000);
     s_fact_count++;
@@ -454,7 +476,7 @@ char *memory_manager_query_rag(const char *query)
     char encoded_query[256] = {0};
     int qi = 0, ei = 0;
     while (query[qi] && ei < (int)sizeof(encoded_query) - 4) {
-        char c = query[qi++];
+        unsigned char c = (unsigned char)query[qi++];
         if (c == ' ') {
             encoded_query[ei++] = '%';
             encoded_query[ei++] = '2';
@@ -462,15 +484,26 @@ char *memory_manager_query_rag(const char *query)
         } else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
                    (c >= '0' && c <= '9') || c == '-' || c == '_' ||
                    c == '.' || c == '~') {
-            encoded_query[ei++] = c;
+            encoded_query[ei++] = (char)c;
         } else {
-            ei += snprintf(encoded_query + ei, sizeof(encoded_query) - ei,
-                           "%%%02X", (unsigned char)c);
+            /* Manual hex-encode to avoid snprintf format-truncation warnings */
+            static const char hex[] = "0123456789ABCDEF";
+            if (ei + 3 < (int)sizeof(encoded_query)) {
+                encoded_query[ei++] = '%';
+                encoded_query[ei++] = hex[(c >> 4) & 0xF];
+                encoded_query[ei++] = hex[c & 0xF];
+            } else {
+                break;
+            }
         }
     }
 
-    snprintf(url, sizeof(url), "%s/memory/query?q=%s&limit=5",
-             companion_http, encoded_query);
+    /* Ensure encoded_query is truncated so the final URL cannot exceed buffer */
+    size_t max_encoded = sizeof(url) - strlen(companion_http) - strlen("/memory/query?q=&limit=5") - 1;
+    if (max_encoded > sizeof(encoded_query) - 1) max_encoded = sizeof(encoded_query) - 1;
+    if ((int)max_encoded < 0) max_encoded = 0;
+    snprintf(url, sizeof(url), "%s/memory/query?q=%.*s&limit=5",
+             companion_http, (int)max_encoded, encoded_query);
 
     char *body = http_get(url, 2048);
     if (!body) return NULL;
@@ -489,18 +522,27 @@ char *memory_manager_query_rag(const char *query)
 
     char *summary = malloc(1024);
     if (!summary) { cJSON_Delete(json); return NULL; }
-    summary[0] = '\0';
-    strncat(summary, "Relevant memories: ", 1023);
+    size_t used = 0;
+    used += snprintf(summary + used, 1024 - used, "Relevant memories: ");
 
     int n = cJSON_GetArraySize(mems);
     for (int i = 0; i < n; i++) {
         cJSON *m    = cJSON_GetArrayItem(mems, i);
         cJSON *text = cJSON_GetObjectItem(m, "text");
         if (text && cJSON_IsString(text)) {
-            int rem = (int)(1023 - strlen(summary));
+            int rem = (int)(1024 - used);
             if (rem > 4) {
-                strncat(summary, text->valuestring, rem - 2);
-                if (i < n - 1) strncat(summary, ". ", 2);
+                int copy_len = rem - 3; /* leave space for separator and NUL */
+                int tlen = (int)strlen(text->valuestring);
+                if (tlen > copy_len) tlen = copy_len;
+                memcpy(summary + used, text->valuestring, tlen);
+                used += tlen;
+                summary[used] = '\0';
+                if (i < n - 1 && (int)(1024 - used) > 2) {
+                    summary[used++] = '.';
+                    summary[used++] = ' ';
+                    summary[used] = '\0';
+                }
             }
         }
     }

@@ -1,32 +1,19 @@
-## IDF Component Manager manifest
-## https://docs.espressif.com/projects/idf-component-manager/
-
+## IDF Component Manager Manifest File
 dependencies:
-  idf: ">=5.2.0"
-
-  ## WebSocket client (for OpenAI Realtime API + companion server)
-  espressif/esp_websocket_client:
-    version: ">=1.1.0"
-
-  ## LVGL v8 display library
-  lvgl/lvgl:
-    version: "~8.3.0"
-
-  ## LCD panel drivers (ST7789 / ST7796)
-  espressif/esp_lcd_st7789:
-    version: ">=1.0.0"
-
-  espressif/esp_lcd_st7796:
-    version: ">=1.0.0"
-
-  ## ESP camera component
-  espressif/esp_camera:
-    version: ">=2.0.0"
-
-  ## JSON library
-  espressif/cjson:
-    version: ">=1.7.14"
-
-  ## HTTP client
-  idf_component_manager/idf_component_manager:
-    version: ">=2.0.0"
+  ## Required IDF version
+  idf:
+    version: '>=4.1.0'
+  # # Put list of dependencies here
+  # # For components maintained by Espressif:
+  # component: "~1.0.0"
+  # # For 3rd party components:
+  # username/component: ">=1.0.0,<2.0.0"
+  # username2/component2:
+  #   version: "~1.0.0"
+  #   # For transient dependencies `public` flag can be set.
+  #   # `public` flag doesn't have an effect dependencies of the `main` component.
+  #   # All dependencies of `main` are public by default.
+  #   public: true
+  espressif/esp_websocket_client: '*'
+  lvgl/lvgl: '*'
+  espressif/cjson: '*'

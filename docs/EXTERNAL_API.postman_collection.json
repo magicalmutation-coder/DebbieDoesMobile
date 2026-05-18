@@ -1,0 +1,145 @@
+{
+  "info": {
+    "name": "DebbieBot External API",
+    "description": "Import this collection to test DebbieBot external integration endpoints. Uses Bearer API key auth for /api/external/* routes and optional Debbie session cookie auth for key management routes.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://YOUR_HOST:3000",
+      "type": "string"
+    },
+    {
+      "key": "externalApiKey",
+      "value": "REPLACE_WITH_EXTERNAL_API_KEY",
+      "type": "string"
+    },
+    {
+      "key": "sessionCookie",
+      "value": "REPLACE_WITH_DBT_COOKIE_VALUE",
+      "type": "string"
+    },
+    {
+      "key": "since",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "limit",
+      "value": "50",
+      "type": "string"
+    },
+    {
+      "key": "topics",
+      "value": "mail,whatsapp",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "External API (Bearer key auth)",
+      "description": "All requests in this folder require Authorization: Bearer {{externalApiKey}}",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{externalApiKey}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/external/health",
+            "description": "Liveness and uptime check."
+          }
+        },
+        {
+          "name": "Events",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{externalApiKey}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/external/events?since={{since}}&limit={{limit}}&topics={{topics}}",
+            "description": "Polls integration events. Topics can include mail and whatsapp."
+          }
+        },
+        {
+          "name": "Agent Query",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{externalApiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Summarize unread Outlook mail and WhatsApp alerts\",\n  \"sessionId\": \"optional-existing-session-id\"\n}"
+            },
+            "url": "{{baseUrl}}/api/external/query",
+            "description": "Sends a command/query to DebbieBot agent via external API."
+          }
+        },
+        {
+          "name": "WhatsApp Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{externalApiKey}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/external/whatsapp/status",
+            "description": "Returns current WhatsApp bridge status."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Key Management (Debbie session cookie auth)",
+      "description": "These routes use Debbie web session auth, not external API key auth.",
+      "item": [
+        {
+          "name": "External Key Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "dbt={{sessionCookie}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/external/key/status",
+            "description": "Checks whether an external API key is configured."
+          }
+        },
+        {
+          "name": "External Key Rotate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "dbt={{sessionCookie}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/external/key/rotate",
+            "description": "Rotates and returns a new external API key."
+          }
+        }
+      ]
+    }
+  ]
+}

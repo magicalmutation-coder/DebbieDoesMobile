@@ -14,6 +14,7 @@
 #include "esp_log.h"
 #include "esp_websocket_client.h"
 #include "esp_http_client.h"
+#include "esp_heap_caps.h"
 #include "cJSON.h"
 #include "mbedtls/base64.h"
 #include "freertos/FreeRTOS.h"
@@ -32,6 +33,155 @@ static SemaphoreHandle_t             s_mutex   = NULL;
 static bool                          s_connected = false;
 static char                          s_api_key[128];
 static char                          s_current_response_id[64];
+static char                          s_ws_headers[320];
+static char                          s_ws_uri[320];
+
+static bool provider_is_openai(void)
+{
+    return strcmp(g_debbie_config.llm_provider, LLM_PROVIDER_OPENAI) == 0;
+}
+
+static bool provider_is_lmstudio(void)
+{
+    return strcmp(g_debbie_config.llm_provider, LLM_PROVIDER_LMSTUDIO) == 0;
+}
+
+static void trim_ascii_whitespace(char *s)
+{
+    if (!s) {
+        return;
+    }
+
+    char *start = s;
+    while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n') {
+        start++;
+    }
+
+    if (start != s) {
+        memmove(s, start, strlen(start) + 1);
+    }
+
+    size_t len = strlen(s);
+    while (len > 0) {
+        char ch = s[len - 1];
+        if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
+            s[--len] = '\0';
+        } else {
+            break;
+        }
+    }
+}
+
+static void collapse_duplicate_dots(char *s)
+{
+    if (!s || !s[0]) {
+        return;
+    }
+
+    char *src = s;
+    char *dst = s;
+    char prev = '\0';
+
+    while (*src) {
+        char ch = *src++;
+        if (ch == '.' && prev == '.') {
+            continue;
+        }
+        *dst++ = ch;
+        prev = ch;
+    }
+    *dst = '\0';
+}
+
+static void trim_trailing_slashes(char *s)
+{
+    if (!s) return;
+    size_t len = strlen(s);
+    while (len > 0 && s[len - 1] == '/') {
+        s[--len] = '\0';
+    }
+}
+
+static bool append_bounded(char *dst, size_t dst_len, const char *src)
+{
+    if (!dst || dst_len == 0 || !src) {
+        return false;
+    }
+    size_t used = strlen(dst);
+    size_t add = strlen(src);
+    if (used + add >= dst_len) {
+        return false;
+    }
+    memcpy(dst + used, src, add + 1);
+    return true;
+}
+
+static esp_err_t build_realtime_uri(char *out, size_t out_len)
+{
+    if (!out || out_len == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    out[0] = '\0';
+
+    if (provider_is_lmstudio()) {
+        char base[256];
+        const char *cfg_base = g_debbie_config.local_llm_url[0]
+                             ? g_debbie_config.local_llm_url
+                             : LOCAL_LMSTUDIO_DEFAULT_URL;
+        const char *model = g_debbie_config.local_llm_model[0]
+                          ? g_debbie_config.local_llm_model
+                          : LOCAL_LLM_DEFAULT_MODEL;
+
+        snprintf(base, sizeof(base), "%s", cfg_base);
+        trim_ascii_whitespace(base);
+        collapse_duplicate_dots(base);
+        trim_trailing_slashes(base);
+
+        if (!base[0]) {
+            snprintf(base, sizeof(base), "%s", LOCAL_LMSTUDIO_DEFAULT_URL);
+        }
+
+        const char *host_or_base = base;
+        if (strncmp(base, "http://", 7) == 0) {
+            if (!append_bounded(out, out_len, "ws://")) {
+                return ESP_ERR_INVALID_SIZE;
+            }
+            host_or_base = base + 7;
+        } else if (strncmp(base, "https://", 8) == 0) {
+            if (!append_bounded(out, out_len, "wss://")) {
+                return ESP_ERR_INVALID_SIZE;
+            }
+            host_or_base = base + 8;
+        } else if (strncmp(base, "ws://", 5) == 0 || strncmp(base, "wss://", 6) == 0) {
+            if (!append_bounded(out, out_len, base)) {
+                return ESP_ERR_INVALID_SIZE;
+            }
+            host_or_base = NULL;
+        } else {
+            if (!append_bounded(out, out_len, "ws://")) {
+                return ESP_ERR_INVALID_SIZE;
+            }
+            host_or_base = base;
+        }
+
+        if (host_or_base && !append_bounded(out, out_len, host_or_base)) {
+            return ESP_ERR_INVALID_SIZE;
+        }
+        if (!append_bounded(out, out_len, "/v1/realtime?model=")) {
+            return ESP_ERR_INVALID_SIZE;
+        }
+        if (!append_bounded(out, out_len, model)) {
+            return ESP_ERR_INVALID_SIZE;
+        }
+        return ESP_OK;
+    }
+
+    if (!append_bounded(out, out_len, "wss://" OPENAI_REALTIME_HOST OPENAI_REALTIME_PATH)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    return ESP_OK;
+}
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
 
@@ -101,6 +251,7 @@ static void send_session_update(const char *system_prompt)
     cJSON_AddItemToObject(t_notif, "parameters", cJSON_CreateObject());
     cJSON_AddItemToArray(tools, t_notif);
 
+#if DEBBIE_ENABLE_SPOTIFY_RUNTIME
     cJSON *t_spot = cJSON_CreateObject();
     cJSON_AddStringToObject(t_spot, "type", "function");
     cJSON_AddStringToObject(t_spot, "name", "spotify_control");
@@ -120,6 +271,7 @@ static void send_session_update(const char *system_prompt)
     cJSON_AddStringToObject(t_spot_params, "type", "object");
     cJSON_AddItemToObject(t_spot, "parameters", t_spot_params);
     cJSON_AddItemToArray(tools, t_spot);
+#endif
 
     cJSON *t_mem = cJSON_CreateObject();
     cJSON_AddStringToObject(t_mem, "type", "function");
@@ -306,36 +458,87 @@ esp_err_t openai_client_connect(const char *api_key,
                                 oai_event_cb_t cb,
                                 void *user_ctx)
 {
-    if (!api_key || strlen(api_key) == 0) {
-        ESP_LOGE(TAG, "No API key provided");
+    bool use_openai_cloud = provider_is_openai();
+    bool use_lmstudio     = provider_is_lmstudio();
+
+    if (!use_openai_cloud && !use_lmstudio) {
+        ESP_LOGE(TAG, "Unsupported provider for realtime client: %s",
+                 g_debbie_config.llm_provider);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    s_api_key[0] = '\0';
+    if (api_key && api_key[0]) {
+        /* Trim trailing whitespace/newlines from pasted API keys. */
+        size_t key_len = strnlen(api_key, sizeof(s_api_key) - 1);
+        while (key_len > 0) {
+            char ch = api_key[key_len - 1];
+            if (ch == '\r' || ch == '\n' || ch == ' ' || ch == '\t') {
+                key_len--;
+            } else {
+                break;
+            }
+        }
+        if (key_len > 0) {
+            memcpy(s_api_key, api_key, key_len);
+            s_api_key[key_len] = '\0';
+        }
+    }
+
+    if (use_openai_cloud && s_api_key[0] == '\0') {
+        ESP_LOGE(TAG, "OpenAI provider selected but API key is missing");
         return ESP_ERR_INVALID_ARG;
     }
 
-    strncpy(s_api_key, api_key, sizeof(s_api_key) - 1);
     s_cb  = cb;
     s_ctx = user_ctx;
 
     if (!s_mutex) s_mutex = xSemaphoreCreateMutex();
 
-    /*
-     * Build the combined headers string required by the OpenAI Realtime API.
-     * esp_websocket_client_config_t accepts a single multi-line header string.
-     * Format: "Key1: Value1\r\nKey2: Value2\r\n"
-     */
-    char headers[320];
-    snprintf(headers, sizeof(headers),
-             "Authorization: Bearer %s\r\nOpenAI-Beta: realtime=v1\r\n",
-             api_key);
+    /* Ensure we never leak websocket tasks/handles across reconnects. */
+    if (s_ws) {
+        esp_websocket_client_stop(s_ws);
+        esp_websocket_client_destroy(s_ws);
+        s_ws = NULL;
+    }
+    s_connected = false;
+
+    s_ws_headers[0] = '\0';
+    if (use_openai_cloud) {
+        snprintf(s_ws_headers, sizeof(s_ws_headers),
+                 "Authorization: Bearer %s\r\nOpenAI-Beta: realtime=v1\r\n",
+                 s_api_key);
+    } else if (s_api_key[0]) {
+        snprintf(s_ws_headers, sizeof(s_ws_headers),
+                 "Authorization: Bearer %s\r\n",
+                 s_api_key);
+    }
+
+    esp_err_t uri_rc = build_realtime_uri(s_ws_uri, sizeof(s_ws_uri));
+    if (uri_rc != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to build realtime URI: %s", esp_err_to_name(uri_rc));
+        return uri_rc;
+    }
+
+    ESP_LOGI(TAG,
+             "Realtime connect [%s] uri=%s free_heap=%u largest_block=%u",
+             g_debbie_config.llm_provider,
+             s_ws_uri,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
     const esp_websocket_client_config_t ws_cfg = {
-        .uri                    = "wss://" OPENAI_REALTIME_HOST OPENAI_REALTIME_PATH,
-        .headers                = headers,
-        .cert_pem               = NULL,   /* Uses bundled CA certificates */
+        .uri                    = s_ws_uri,
+        .headers                = s_ws_headers[0] ? s_ws_headers : NULL,
+        .cert_pem               = NULL,
+        /* Development profile: sdkconfig enables ESP_TLS skip verify.
+         * Keep cert bundle detached to avoid root mismatch failures on this board. */
+        .crt_bundle_attach      = NULL,
         .disable_auto_reconnect = false,
         .reconnect_timeout_ms   = 5000,
-        .network_timeout_ms     = 10000,
+        .network_timeout_ms     = 20000,
         .buffer_size            = 8192,
-        .task_stack             = 8192,
+        .task_stack             = 12288,
         .task_prio              = configMAX_PRIORITIES - 3,
     };
 
@@ -345,9 +548,22 @@ esp_err_t openai_client_connect(const char *api_key,
         return ESP_FAIL;
     }
 
-    ESP_ERROR_CHECK(esp_websocket_register_events(s_ws, WEBSOCKET_EVENT_ANY,
-                    ws_event_handler, NULL));
-    ESP_ERROR_CHECK(esp_websocket_client_start(s_ws));
+    esp_err_t rc = esp_websocket_register_events(s_ws, WEBSOCKET_EVENT_ANY,
+                                                 ws_event_handler, NULL);
+    if (rc != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register websocket events: %s", esp_err_to_name(rc));
+        esp_websocket_client_destroy(s_ws);
+        s_ws = NULL;
+        return rc;
+    }
+
+    rc = esp_websocket_client_start(s_ws);
+    if (rc != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start websocket client: %s", esp_err_to_name(rc));
+        esp_websocket_client_destroy(s_ws);
+        s_ws = NULL;
+        return rc;
+    }
 
     /* Wait for connection up to 10 s */
     int waited = 0;
@@ -357,7 +573,10 @@ esp_err_t openai_client_connect(const char *api_key,
     }
 
     if (!s_connected) {
-        ESP_LOGE(TAG, "Timed out waiting for WebSocket connection");
+        ESP_LOGE(TAG,
+                 "Timed out waiting for WebSocket connection (free_heap=%u largest_block=%u)",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
         esp_websocket_client_stop(s_ws);
         esp_websocket_client_destroy(s_ws);
         s_ws = NULL;
@@ -449,7 +668,12 @@ esp_err_t openai_client_send_text(const char *text)
 
 esp_err_t openai_client_send_image(const char *jpeg_b64, const char *prompt)
 {
-    if (!jpeg_b64 || !s_api_key[0]) return ESP_ERR_INVALID_ARG;
+    if (!jpeg_b64) return ESP_ERR_INVALID_ARG;
+    if (!provider_is_openai()) {
+        ESP_LOGW(TAG, "Vision HTTP path is currently supported only with OpenAI provider");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (!s_api_key[0]) return ESP_ERR_INVALID_ARG;
 
     /*
      * Vision via Chat Completions API (gpt-4o).

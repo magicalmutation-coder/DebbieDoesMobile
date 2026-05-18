@@ -43,6 +43,7 @@ typedef struct {
 /* LLM provider identifiers */
 #define LLM_PROVIDER_OPENAI     "openai"
 #define LLM_PROVIDER_OLLAMA     "ollama"
+#define LLM_PROVIDER_LMSTUDIO   "lmstudio"
 #define LLM_PROVIDER_ANTHROPIC  "anthropic"
 #define LLM_PROVIDER_GROQ       "groq"
 #define LLM_PROVIDER_OPENROUTER "openrouter"
@@ -62,7 +63,7 @@ typedef struct {
     char ble_device_name[32];    /* advertised BLE name, default = debbie_name */
 
     /* ── AI: provider & model ─────────────────────────────────────────────── */
-    char llm_provider[32];       /* "openai" | "ollama" | "anthropic" | "groq" | "openrouter" */
+    char llm_provider[32];       /* "openai" | "ollama" | "lmstudio" | "anthropic" | "groq" | "openrouter" */
     char llm_model[64];          /* e.g. "gpt-4o", "llama3", "claude-3-5-sonnet-20241022" */
     char openai_api_key[128];
     char anthropic_api_key[128];

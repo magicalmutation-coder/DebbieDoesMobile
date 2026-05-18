@@ -1,6 +1,7 @@
 #include "notification_client.h"
 #include "settings.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
@@ -67,9 +68,9 @@ static void ws_event_handler(void *arg, esp_event_base_t base,
             else                                         notif.type = NOTIF_TYPE_SYSTEM;
 
             if (sender_j  && cJSON_IsString(sender_j))
-                strncpy(notif.sender,  sender_j->valuestring,  sizeof(notif.sender) - 1);
+                snprintf(notif.sender, sizeof(notif.sender), "%s", sender_j->valuestring);
             if (preview_j && cJSON_IsString(preview_j))
-                strncpy(notif.preview, preview_j->valuestring, sizeof(notif.preview) - 1);
+                snprintf(notif.preview, sizeof(notif.preview), "%s", preview_j->valuestring);
 
             notif.timestamp_ms = esp_timer_get_time() / 1000;
             notif.read         = false;
