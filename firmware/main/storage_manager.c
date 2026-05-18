@@ -94,6 +94,7 @@ esp_err_t storage_init(void)
     NVS_GET_STR("local_llm_mdl", g_debbie_config.local_llm_model);
     NVS_GET_STR("agent_url",     g_debbie_config.agent_ws_url);
     NVS_GET_STR("companion_url", g_debbie_config.companion_url);
+    NVS_GET_STR("ext_api_key",   g_debbie_config.companion_external_api_key);
     NVS_GET_STR("name",          g_debbie_config.debbie_name);
     NVS_GET_STR("sys_prompt",    g_debbie_config.system_prompt);
     NVS_GET_STR("voice_style",   g_debbie_config.voice_style);
@@ -161,6 +162,7 @@ esp_err_t storage_save_config(void)
     NVS_SET_STR("local_llm_mdl", g_debbie_config.local_llm_model);
     NVS_SET_STR("agent_url",     g_debbie_config.agent_ws_url);
     NVS_SET_STR("companion_url", g_debbie_config.companion_url);
+    NVS_SET_STR("ext_api_key",   g_debbie_config.companion_external_api_key);
     NVS_SET_STR("name",          g_debbie_config.debbie_name);
     NVS_SET_STR("sys_prompt",    g_debbie_config.system_prompt);
     NVS_SET_STR("voice_style",   g_debbie_config.voice_style);

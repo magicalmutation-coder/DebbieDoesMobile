@@ -37,7 +37,13 @@ function initDb() {
     const dbPath = process.env.MEMORY_DB_PATH ||
                    path.join(__dirname, 'debbie_memory.db');
 
-    db = new Database(dbPath);
+    try {
+        db = new Database(dbPath);
+    } catch (e) {
+        console.warn('[memory] better-sqlite3 binding unavailable — memory store disabled.');
+        console.warn(`[memory] ${e.message}`);
+        return null;
+    }
     db.pragma('journal_mode = WAL');
     db.pragma('synchronous = NORMAL');
 

@@ -39,6 +39,7 @@ The UI now focuses on practical status and text output: WiFi/AI state, notificat
 | 🧪 **Local LLM Provider (LM Studio)** | Select LM Studio in setup and auto-detect available local models |
 | ✅ **Provider Model Probe** | `/llm_models` can now query model lists for Ollama, LM Studio, and OpenAI (when API key is configured) |
 | 🔐 **OpenAI Key Guardrails** | Setup now sanitizes pasted OpenAI keys (trims whitespace, strips accidental `Bearer ` prefixes/text) and shows a specific on-device warning when key auth is rejected |
+| 🧩 **Node Agent Bridge Tool** | Debbie now exposes `node_agent_query` so the live voice agent can call companion `/api/external/query` with Bearer auth |
 | 🎵 **Spotify Control** | Temporarily paused in runtime while connectivity and launcher UX are stabilised |
 | 🔔 **Agent Notifications** | Connect to your own AI agent (e.g. D3881E) for custom notifications |
 | ⚙️ **Captive-Portal Setup** | First-run web UI at `192.168.4.1` for easy configuration |
@@ -168,6 +169,11 @@ External HTTP integration note: companion projects consuming `/api/external/*`
 should send `Authorization: Bearer YOUR_EXTERNAL_API_KEY` on every call.
 See [External API handoff contract](docs/EXTERNAL_API_HANDOFF.md) for endpoint and error contracts.
 
+Node bridge note: to let Debbie's on-device agent tool call Node `/api/external/query`, set:
+1. `EXTERNAL_API_KEY` in `companion-server/.env`
+2. `Companion Server URL` and `External API Key` in Debbie setup page (`http://192.168.4.1`)
+3. `AGENT_URL` in `companion-server/.env` if you want `/api/external/query` to forward into D3881E
+
 Share-pack note: the full handoff packet is available in [external-api-handoff](external-api-handoff/README.md) and can be shared as-is with partner projects.
 
 ---
@@ -189,6 +195,7 @@ Settings storage note: configuration is persisted in internal ESP32 NVS flash (n
 | `openai_api_key` | OpenAI API key (sk-...) | — |
 | `agent_ws_url` | Custom agent WebSocket URL | — |
 | `companion_url` | Companion server WebSocket URL | — |
+| `companion_external_api_key` | Bearer token Debbie uses for companion `/api/external/*` routes | — |
 | `debbie_name` | Name shown on screen | Debbie |
 | `system_prompt` | Debbie's persona prompt | friendly AI companion |
 | `speaker_volume` | Speaker volume 0–100 | 75 |

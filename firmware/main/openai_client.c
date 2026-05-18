@@ -11,6 +11,7 @@
 #include "openai_client.h"
 #include "settings.h"
 #include "debbie.h"
+#include "self_agent.h"
 #include "esp_log.h"
 #include "esp_websocket_client.h"
 #include "esp_http_client.h"
@@ -308,6 +309,24 @@ static void send_session_update(const char *system_prompt)
         cJSON_AddItemToObject(t_mem, "parameters", params);
     }
     cJSON_AddItemToArray(tools, t_mem);
+
+    /* Merge in additional self-agent tools (network scan, web_fetch,
+     * node_agent_query, etc.) from shared JSON schema. */
+    cJSON *extra_tools = cJSON_Parse(AGENT_TOOLS_JSON);
+    if (extra_tools && cJSON_IsArray(extra_tools)) {
+        cJSON *item = NULL;
+        cJSON_ArrayForEach(item, extra_tools) {
+            cJSON *dup = cJSON_Duplicate(item, 1);
+            if (dup) {
+                cJSON_AddItemToArray(tools, dup);
+            }
+        }
+    } else {
+        ESP_LOGW(TAG, "Failed to parse AGENT_TOOLS_JSON; continuing with built-in tool set");
+    }
+    if (extra_tools) {
+        cJSON_Delete(extra_tools);
+    }
 
     cJSON_AddStringToObject(root,  "type",  "session.update");
     cJSON_AddStringToObject(sess,  "modalities", "audio");

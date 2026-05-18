@@ -97,6 +97,9 @@ Behavior note:
 - storage_save_config
 - storage_factory_reset
 
+Behavior note:
+- NVS config now includes `ext_api_key` for companion external API bearer auth used by Debbie tool calls.
+
 ## OpenAI client
 
 ### openai_client.h
@@ -112,6 +115,7 @@ Behavior note:
 Behavior note:
 - Local provider realtime URI construction now normalizes malformed base URLs (trims whitespace/trailing slash and collapses duplicate dots) before opening the WebSocket.
 - Reconnect path now tears down existing websocket handles before creating a new client and returns errors instead of aborting the firmware on websocket start failures.
+- Session tool registration now merges `AGENT_TOOLS_JSON` so self-agent tools (including `node_agent_query`) are available to the live runtime model.
 
 ### OpenAI events (openai_client.h)
 - OAI_EVT_CONNECTED
@@ -137,6 +141,7 @@ Behavior note:
 Behavior note:
 - Spotify command plumbing remains in the API for compatibility, but runtime Spotify controls are currently gated off.
 - External HTTP integrations should use `Authorization: Bearer <external_api_key>` for `/api/external/*` routes; handoff details are documented in `docs/EXTERNAL_API_HANDOFF.md`.
+- Companion server external API now includes `/api/external/health`, `/api/external/events`, `/api/external/query`, `/api/external/whatsapp/status`, plus `/api/external/key/{status,rotate}`.
 
 Integration artifacts:
 - `docs/EXTERNAL_API_HANDOFF.md` (human-readable contract)
@@ -160,6 +165,7 @@ Behavior note:
 - Bluetooth controls remain visible in setup, but profiles built with `DEBBIE_ENABLE_BLE_RUNTIME=0` lock BLE enablement off and show guidance that Bluetooth speaker audio output is unsupported on this ESP32-S3 path.
 - The Network tab now shows a small "BLE runtime off" badge when BLE runtime is compiled out on this profile.
 - `/status` now includes `local_llm_model`, and `/configure` normalizes `local_llm_url` plus preserves local model selection separately from cloud-provider model fields.
+- `/configure` now accepts `ext_api_key` for companion external API bearer auth and sanitizes optional pasted `Bearer ` prefix.
 - `/configure` now sanitizes `openai_api_key` input (trims whitespace, strips accidental `Bearer ` prefixes, and truncates pasted trailing text).
 - `/llm_models?provider=openai` performs an HTTPS request to OpenAI `/v1/models` using the configured `openai_api_key` and returns richer upstream failure detail for auth/setup troubleshooting.
 - Spotify notification controls are hidden in setup UI while runtime Spotify support remains disabled.
@@ -218,3 +224,6 @@ Behavior note:
 - self_agent_cve_lookup
 - self_agent_handle_function_call
 - AGENT_TOOLS_JSON (exported tool schema string)
+
+Behavior note:
+- Tool schema now includes `node_agent_query`, allowing Debbie to POST text/session payloads to companion `/api/external/query` with configured bearer auth.

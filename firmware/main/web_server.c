@@ -119,6 +119,34 @@ static void sanitize_openai_api_key(char *s)
     trim_ascii_whitespace(s);
 }
 
+static void sanitize_bearer_token(char *s)
+{
+    if (!s) {
+        return;
+    }
+
+    trim_ascii_whitespace(s);
+    if (!s[0]) {
+        return;
+    }
+
+    if (strncmp(s, "Bearer ", 7) == 0 || strncmp(s, "bearer ", 7) == 0) {
+        memmove(s, s + 7, strlen(s + 7) + 1);
+        trim_ascii_whitespace(s);
+    }
+
+    for (size_t i = 0; s[i]; ++i) {
+        char ch = s[i];
+        if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' ||
+            ch == '"' || ch == '\'' || ch == ',' || ch == ';') {
+            s[i] = '\0';
+            break;
+        }
+    }
+
+    trim_ascii_whitespace(s);
+}
+
 static void extract_error_detail(const char *body, char *out, size_t out_sz)
 {
     if (!out || out_sz == 0) {
@@ -309,6 +337,9 @@ static const char SETUP_HTML[] =
 "<label>Companion Server URL</label>"
 "<input id='companion_url' placeholder='ws://192.168.1.10:3001'>"
 "<p class='hint'>Node.js companion server for WhatsApp, Email, memory/RAG, and agent tools.</p>"
+"<label>External API Key</label>"
+"<input id='ext_api_key' type='password' placeholder='Bearer key for /api/external/* routes'>"
+"<p class='hint'>Used by Debbie tool calls to authenticate against Node /api/external/query.</p>"
 "</div>"
 
 "</div>"
@@ -681,6 +712,7 @@ static const char SETUP_HTML[] =
 "  ssid3:g('ssid3'),pass3:g('pass3'),"
 "  bt_en:gc('bt_en'),ble_name:g('ble_name'),"
 "  companion_url:g('companion_url'),"
+"  ext_api_key:g('ext_api_key'),"
 "  llm_provider:p,llm_model:getModel(),"
 "  oai_key:g('oai_key'),"
 "  anthropic_key:g('anthropic_key'),"
@@ -737,7 +769,8 @@ static const char SETUP_HTML[] =
 "   '<span><span class=\"dot '+(j.wifi_ok?'green':'red')+'\" ></span>WiFi: '+(j.wifi_ok?'Connected':'Offline')+'</span>'"
 "   +'<span><span class=\"dot '+(j.bt_on?'blue':'red')+'\" ></span>BLE: '+(j.bt_on?'On':'Off')+'</span>'"
 "   +'<span>State: '+j.state+'</span>'"
-"   +'<span>LLM: '+j.llm_provider+'/'+j.llm_model+'</span>';"
+"   +'<span>LLM: '+j.llm_provider+'/'+j.llm_model+'</span>'"
+"   +'<span>Node key: '+(j.ext_key_set?'set':'missing')+'</span>';"
 "  /* pre-fill fields from config */"
 "  if(j.ssid)s('ssid',j.ssid);"
 "  if(j.ssid2)s('ssid2',j.ssid2);"
@@ -815,6 +848,8 @@ static esp_err_t handler_status(httpd_req_t *req)
     cJSON_AddStringToObject(json, "sys_prompt",   g_debbie_config.system_prompt);
     cJSON_AddStringToObject(json, "agent_url",    g_debbie_config.agent_ws_url);
     cJSON_AddStringToObject(json, "companion_url",g_debbie_config.companion_url);
+    cJSON_AddBoolToObject(json,   "ext_key_set",
+                          g_debbie_config.companion_external_api_key[0] != '\0');
     cJSON_AddStringToObject(json, "llm_provider", g_debbie_config.llm_provider);
     cJSON_AddStringToObject(json, "llm_model",    g_debbie_config.llm_model);
     cJSON_AddStringToObject(json, "local_llm_url",g_debbie_config.local_llm_url);
@@ -895,6 +930,7 @@ static esp_err_t handler_configure(httpd_req_t *req)
     GET_STR("pass3",         g_debbie_config.wifi_password3);
     GET_STR("ble_name",      g_debbie_config.ble_device_name);
     GET_STR("companion_url", g_debbie_config.companion_url);
+    GET_STR("ext_api_key",   g_debbie_config.companion_external_api_key);
 #if DEBBIE_ENABLE_BLE_RUNTIME
     GET_BOOL("bt_en",        g_debbie_config.bluetooth_enabled);
 #else
@@ -917,6 +953,7 @@ static esp_err_t handler_configure(httpd_req_t *req)
     trim_ascii_whitespace(g_debbie_config.llm_model);
     trim_ascii_whitespace(g_debbie_config.local_llm_model);
     sanitize_openai_api_key(g_debbie_config.openai_api_key);
+    sanitize_bearer_token(g_debbie_config.companion_external_api_key);
     sanitize_local_llm_url(g_debbie_config.local_llm_url);
 
     bool is_ollama = strcmp(g_debbie_config.llm_provider, LLM_PROVIDER_OLLAMA) == 0;

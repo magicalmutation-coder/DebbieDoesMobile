@@ -75,6 +75,7 @@ typedef struct {
     /* ── AI: agent / companion ────────────────────────────────────────────── */
     char agent_ws_url[256];      /* custom agent WebSocket endpoint */
     char companion_url[256];     /* companion server base URL */
+    char companion_external_api_key[128]; /* Bearer key for external API routes */
     bool use_custom_agent;       /* use agent endpoint instead of direct LLM */
 
     /* ── Services: Spotify ────────────────────────────────────────────────── */

@@ -51,6 +51,34 @@ Your agent should emit JSON in this format:
 | POST | `/notify` | Send notification to all devices |
 | POST | `/spotify` | Spotify command |
 
+## External API (`/api/external/*`)
+
+These endpoints are intended for partner projects and remote integrations.
+
+Authentication for all `/api/external/*` routes:
+
+- Preferred: `Authorization: Bearer YOUR_EXTERNAL_API_KEY`
+- Also accepted: `x-api-key`, `x-debbie-key`, or `?key=`
+
+Configured by `.env`:
+
+- `EXTERNAL_API_KEY` (required for external routes)
+
+Endpoints:
+
+- `GET /api/external/health`
+- `GET /api/external/events?since=UNIX_MS&limit=50&topics=mail,whatsapp`
+- `POST /api/external/query` with body `{ "text": "...", "sessionId": "optional" }`
+- `GET /api/external/whatsapp/status`
+
+Key management routes (Debbie session cookie auth):
+
+- `GET /api/external/key/status`
+- `POST /api/external/key/rotate`
+
+To enable key-management auth, set `DEBBIE_SESSION_COOKIE` in `.env`,
+and send `Cookie: dbt=<value>` on those routes.
+
 ## Production Deployment
 
 For a persistent server (e.g. on a Raspberry Pi or home server):

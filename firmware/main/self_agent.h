@@ -4,6 +4,7 @@
  *
  * ✅ Self-introspection (hardware, memory, WiFi, uptime)
  * ✅ Internet access (HTTP GET/POST)
+ * ✅ Node external API query bridge (/api/external/query)
  * ✅ DNS lookups
  * ✅ CVE database queries (NVD API)
  * ✅ Network security scanning tools
@@ -46,7 +47,7 @@ char *self_agent_cve_lookup(const char *cve_id);
 /**
  * @brief  Handle a function call dispatched by the AI model.
  *         Handles: system_info, web_fetch, dns_lookup, cve_lookup,
- *                  network_scan, get_vuln_report.
+ *                  node_agent_query, network_scan, get_vuln_report.
  *
  * @return true if the function was handled, false if unknown.
  */

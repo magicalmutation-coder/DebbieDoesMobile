@@ -139,6 +139,129 @@ static esp_err_t http_body_handler(esp_http_client_event_t *evt)
     return ESP_OK;
 }
 
+static bool build_companion_http_url(char *out, size_t out_sz, const char *path)
+{
+    if (!out || out_sz == 0 || !path || !path[0]) return false;
+    out[0] = '\0';
+
+    const char *base = g_debbie_config.companion_url;
+    if (!base || !base[0]) return false;
+
+    size_t pos = 0;
+    const char *prefix = "";
+    if (strncmp(base, "ws://", 5) == 0) {
+        prefix = "http://";
+        base += 5;
+    } else if (strncmp(base, "wss://", 6) == 0) {
+        prefix = "https://";
+        base += 6;
+    }
+
+    for (size_t i = 0; prefix[i] != '\0'; ++i) {
+        if (pos + 1 >= out_sz) return false;
+        out[pos++] = prefix[i];
+    }
+
+    for (size_t i = 0; base[i] != '\0'; ++i) {
+        if (pos + 1 >= out_sz) return false;
+        out[pos++] = base[i];
+    }
+    out[pos] = '\0';
+
+    while (pos > 0 && out[pos - 1] == '/') {
+        out[--pos] = '\0';
+    }
+
+    for (size_t i = 0; path[i] != '\0'; ++i) {
+        if (pos + 1 >= out_sz) return false;
+        out[pos++] = path[i];
+    }
+    out[pos] = '\0';
+    return true;
+}
+
+static char *self_agent_node_query(const char *text, const char *session_id)
+{
+    if (!text || !text[0]) {
+        return strdup("{\"ok\":false,\"error\":\"text required\"}");
+    }
+    if (!g_debbie_config.companion_url[0]) {
+        return strdup("{\"ok\":false,\"error\":\"companion_url not configured\"}");
+    }
+    if (!g_debbie_config.companion_external_api_key[0]) {
+        return strdup("{\"ok\":false,\"error\":\"external API key missing\"}");
+    }
+
+    char url[320];
+    if (!build_companion_http_url(url, sizeof(url), "/api/external/query")) {
+        return strdup("{\"ok\":false,\"error\":\"invalid companion URL\"}");
+    }
+
+    cJSON *payload = cJSON_CreateObject();
+    cJSON_AddStringToObject(payload, "text", text);
+    if (session_id && session_id[0]) {
+        cJSON_AddStringToObject(payload, "sessionId", session_id);
+    }
+    char *payload_str = cJSON_PrintUnformatted(payload);
+    cJSON_Delete(payload);
+    if (!payload_str) {
+        return strdup("{\"ok\":false,\"error\":\"payload encode failed\"}");
+    }
+
+    http_resp_t resp = { .buf = malloc(1024), .len = 0, .cap = 1024 };
+    if (!resp.buf) {
+        free(payload_str);
+        return strdup("{\"ok\":false,\"error\":\"out of memory\"}");
+    }
+    resp.buf[0] = '\0';
+
+    esp_http_client_config_t cfg = {
+        .url = url,
+        .timeout_ms = 12000,
+        .event_handler = http_body_handler,
+        .user_data = &resp,
+        .skip_cert_common_name_check = true,
+    };
+
+    esp_http_client_handle_t cli = esp_http_client_init(&cfg);
+    if (!cli) {
+        free(payload_str);
+        free(resp.buf);
+        return strdup("{\"ok\":false,\"error\":\"HTTP client init failed\"}");
+    }
+
+    char auth[192];
+    snprintf(auth, sizeof(auth), "Bearer %s", g_debbie_config.companion_external_api_key);
+
+    esp_http_client_set_method(cli, HTTP_METHOD_POST);
+    esp_http_client_set_header(cli, "Content-Type", "application/json");
+    esp_http_client_set_header(cli, "Accept", "application/json");
+    esp_http_client_set_header(cli, "Authorization", auth);
+    esp_http_client_set_post_field(cli, payload_str, strlen(payload_str));
+
+    esp_err_t err = esp_http_client_perform(cli);
+    int status = esp_http_client_get_status_code(cli);
+    esp_http_client_cleanup(cli);
+    free(payload_str);
+
+    if (err != ESP_OK || status < 200 || status >= 300) {
+        cJSON *fail = cJSON_CreateObject();
+        cJSON_AddBoolToObject(fail, "ok", false);
+        cJSON_AddStringToObject(fail, "error", "node query failed");
+        cJSON_AddNumberToObject(fail, "status", status);
+        cJSON_AddStringToObject(fail, "url", url);
+        if (resp.buf && resp.buf[0]) {
+            cJSON_AddStringToObject(fail, "detail", resp.buf);
+        }
+        char *out = cJSON_PrintUnformatted(fail);
+        cJSON_Delete(fail);
+        free(resp.buf);
+        return out ? out : strdup("{\"ok\":false,\"error\":\"node query failed\"}");
+    }
+
+    return resp.buf;
+}
+
 char *self_agent_http_get(const char *url, int max_bytes)
 {
     if (!url) return NULL;
@@ -333,6 +456,20 @@ const char *AGENT_TOOLS_JSON =
 "    \"required\":[\"hostname\"]"
 "  }"
 "},"
+/* node_agent_query */
+"{"
+"  \"type\":\"function\"," 
+"  \"name\":\"node_agent_query\"," 
+"  \"description\":\"Send a text query to the companion Node external API (/api/external/query) and return its JSON response. Requires companion_url and external API key in Debbie setup.\"," 
+"  \"parameters\":{"
+"    \"type\":\"object\"," 
+"    \"properties\":{"
+"      \"text\":{\"type\":\"string\",\"description\":\"Command or query text to send to the Node agent\"},"
+"      \"session_id\":{\"type\":\"string\",\"description\":\"Optional external API session identifier\"}"
+"    },"
+"    \"required\":[\"text\"]"
+"  }"
+"},"
 /* cve_lookup */
 "{"
 "  \"type\":\"function\","
@@ -504,6 +641,28 @@ bool self_agent_handle_function_call(const char *fn_name,
         } else {
             openai_client_send_function_result(call_id,
                 "{\"error\":\"cve_id required\"}");
+        }
+        cJSON_Delete(args);
+        return true;
+    }
+
+    /* ── node_agent_query ── */
+    if (strcmp(fn_name, "node_agent_query") == 0) {
+        cJSON *text_j = cJSON_GetObjectItem(args, "text");
+        cJSON *session_j = cJSON_GetObjectItem(args, "session_id");
+
+        if (text_j && cJSON_IsString(text_j) && text_j->valuestring && text_j->valuestring[0]) {
+            display_manager_show_text("🤝 Querying Node agent...");
+            const char *session_id = (session_j && cJSON_IsString(session_j))
+                ? session_j->valuestring
+                : "default";
+            char *result = self_agent_node_query(text_j->valuestring, session_id);
+            openai_client_send_function_result(call_id,
+                result ? result : "{\"ok\":false,\"error\":\"node query failed\"}");
+            free(result);
+        } else {
+            openai_client_send_function_result(call_id,
+                "{\"ok\":false,\"error\":\"text required\"}");
         }
         cJSON_Delete(args);
         return true;
