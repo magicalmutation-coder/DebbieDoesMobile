@@ -116,7 +116,13 @@ Display runtime note: backlight GPIO is now held high in firmware (`gpio_hold_en
 ```bash
 # Clone this repository
 git clone https://github.com/magicalmutation-coder/DebbieDoesMobile.git
-cd DebbieDoesMobile/firmware
+cd DebbieDoesMobile
+
+# Pull required nested repositories
+git submodule update --init --recursive
+
+# Continue into firmware
+cd firmware
 
 # Set target to ESP32-S3
 idf.py set-target esp32s3
@@ -129,6 +135,8 @@ idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
 > **Windows:** Use `idf.py -p COM3 flash monitor`
+
+Workspace portability note: this repository uses nested git dependencies (for example ESP-IDF and firmware component repos). On any new machine or VS Code agent, run `git submodule update --init --recursive` after clone before building.
 
 ### 2. First-Run Setup
 

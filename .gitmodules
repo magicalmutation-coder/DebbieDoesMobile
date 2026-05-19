@@ -1,0 +1,24 @@
+[submodule "esp-idf-v6.0.1"]
+	path = esp-idf-v6.0.1
+	url = https://github.com/espressif/esp-idf.git
+	ignore = dirty
+[submodule "firmware/components/esp-eth-drivers"]
+	path = firmware/components/esp-eth-drivers
+	url = https://github.com/espressif/esp-eth-drivers.git
+	ignore = dirty
+[submodule "firmware/components/esp-iot-solution"]
+	path = firmware/components/esp-iot-solution
+	url = https://github.com/espressif/esp-iot-solution.git
+	ignore = dirty
+[submodule "firmware/components/esp32-camera"]
+	path = firmware/components/esp32-camera
+	url = https://github.com/espressif/esp32-camera.git
+	ignore = dirty
+[submodule "firmware/components/esp_camera"]
+	path = firmware/components/esp_camera
+	url = https://github.com/espressif/esp32-camera.git
+	ignore = dirty
+[submodule "openai-realtime-embedded"]
+	path = openai-realtime-embedded
+	url = https://github.com/Freenove/openai-realtime-embedded
+	ignore = dirty

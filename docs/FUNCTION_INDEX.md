@@ -2,6 +2,11 @@
 
 This index lists public module APIs in firmware/main for quick navigation.
 
+## Repository dependencies
+
+- This repository includes nested git dependencies (for example `esp-idf-v6.0.1`, `openai-realtime-embedded`, and firmware component repos).
+- On a fresh checkout, run `git submodule update --init --recursive` before building firmware.
+
 ## Runtime feature switches
 
 ### settings.h
