@@ -142,6 +142,7 @@ Behavior note:
 - Spotify command plumbing remains in the API for compatibility, but runtime Spotify controls are currently gated off.
 - External HTTP integrations should use `Authorization: Bearer <external_api_key>` for `/api/external/*` routes; handoff details are documented in `docs/EXTERNAL_API_HANDOFF.md`.
 - Companion server external API now includes `/api/external/health`, `/api/external/events`, `/api/external/query`, `/api/external/whatsapp/status`, plus `/api/external/key/{status,rotate}`.
+- Companion `/api/external/query` now supports AGENT_URL in two modes: WebSocket bridge (`ws://` / `wss://`) and HTTP forwarding (`http://` / `https://` to downstream `/api/external/query`).
 
 Integration artifacts:
 - `docs/EXTERNAL_API_HANDOFF.md` (human-readable contract)
@@ -227,3 +228,4 @@ Behavior note:
 
 Behavior note:
 - Tool schema now includes `node_agent_query`, allowing Debbie to POST text/session payloads to companion `/api/external/query` with configured bearer auth.
+- `node_agent_query` URL build now prefers `companion_url` and falls back to `agent_ws_url` when companion URL is not set, converting ws/wss schemes to http/https and trimming trailing `/login` when present.

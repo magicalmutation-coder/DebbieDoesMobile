@@ -21,6 +21,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 const cors       = require('cors');
 const rateLimit  = require('express-rate-limit');
 const crypto     = require('crypto');
+const axios      = require('axios');
 
 const { startWhatsApp } = require('./whatsapp');
 const { startEmailMonitor } = require('./email_monitor');
@@ -173,6 +174,65 @@ function normalizeAgentResponse(result) {
     return { content, stats, id };
 }
 
+function normalizeAgentUrl(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== 'string') return '';
+    let url = rawUrl.trim();
+    while (url.endsWith('/')) {
+        url = url.slice(0, -1);
+    }
+    if (url.endsWith('/login')) {
+        url = url.slice(0, -6);
+    }
+    while (url.endsWith('/')) {
+        url = url.slice(0, -1);
+    }
+    return url;
+}
+
+function getAgentUrlMode() {
+    const agentUrl = normalizeAgentUrl(process.env.AGENT_URL || '');
+    if (!agentUrl) return 'none';
+    if (/^wss?:\/\//i.test(agentUrl)) return 'ws';
+    if (/^https?:\/\//i.test(agentUrl)) return 'http';
+    return 'invalid';
+}
+
+async function queryHttpAgent(text, sessionId) {
+    const base = normalizeAgentUrl(process.env.AGENT_URL || '');
+    if (!base || !/^https?:\/\//i.test(base)) {
+        throw new Error('HTTP agent URL is not configured');
+    }
+
+    const endpoint = `${base}/api/external/query`;
+    const headers = {
+        'Content-Type': 'application/json',
+        'x-debbie-forwarded': '1',
+    };
+    const agentKey = process.env.AGENT_EXTERNAL_API_KEY || process.env.EXTERNAL_API_KEY;
+    if (agentKey) {
+        headers.Authorization = `Bearer ${agentKey}`;
+    }
+
+    const response = await axios.post(
+        endpoint,
+        { text, sessionId },
+        {
+            timeout: 20000,
+            validateStatus: () => true,
+            headers,
+        }
+    );
+
+    if (response.status < 200 || response.status >= 300) {
+        const detail = typeof response.data === 'object'
+            ? JSON.stringify(response.data)
+            : String(response.data || '');
+        throw new Error(`HTTP agent query failed (${response.status}): ${detail}`);
+    }
+
+    return response.data;
+}
+
 /* ── Spotify instance ─────────────────────────────────────────────────── */
 let spotify = null;
 
@@ -273,13 +333,16 @@ const externalKeyRouter = express.Router();
 externalRouter.use(externalLimiter);
 
 externalRouter.get('/health', (req, res) => {
+    const agentMode = getAgentUrlMode();
     res.json({
         ok: true,
         time: new Date().toISOString(),
         uptimeSec: Math.floor(process.uptime()),
         sessionId: activeSessionId,
         devices: devices.size,
+        agentMode,
         agentConnected: !!(agentBridge && agentBridge.isConnected()),
+        agentForwardReady: agentMode === 'http' || !!(agentBridge && agentBridge.isConnected()),
     });
 });
 
@@ -324,15 +387,28 @@ externalRouter.post('/query', async (req, res) => {
         text,
     });
 
-    if (!agentBridge || !agentBridge.isConnected()) {
-        return res.status(503).json({
-            error: 'Agent bridge unavailable',
+    if (req.headers['x-debbie-forwarded'] === '1') {
+        return res.status(508).json({
+            error: 'Forward loop detected (AGENT_URL points to this same external endpoint)',
             sessionId: activeSessionId,
         });
     }
 
+    const agentMode = getAgentUrlMode();
+
     try {
-        const result = await agentBridge.sendQuery(text, activeSessionId, 20000);
+        let result = null;
+        if (agentBridge && agentBridge.isConnected()) {
+            result = await agentBridge.sendQuery(text, activeSessionId, 20000);
+        } else if (agentMode === 'http') {
+            result = await queryHttpAgent(text, activeSessionId);
+        } else {
+            return res.status(503).json({
+                error: 'Agent bridge unavailable',
+                sessionId: activeSessionId,
+            });
+        }
+
         const normalized = normalizeAgentResponse(result);
         addExternalEvent('agent.response', {
             sessionId: activeSessionId,
@@ -466,10 +542,17 @@ async function main() {
 
     /* Custom agent bridge */
     if (process.env.AGENT_URL) {
-        agentBridge = new AgentBridge(process.env.AGENT_URL, (notification) => {
-            broadcast(notification);
-        });
-        agentBridge.connect();
+        const agentMode = getAgentUrlMode();
+        if (agentMode === 'ws') {
+            agentBridge = new AgentBridge(process.env.AGENT_URL, (notification) => {
+                broadcast(notification);
+            });
+            agentBridge.connect();
+        } else if (agentMode === 'http') {
+            console.log('[agent] Using HTTP external API mode via AGENT_URL');
+        } else {
+            console.warn('[agent] AGENT_URL is set but has unsupported scheme. Use ws(s):// or http(s)://');
+        }
     } else {
         console.warn('[agent] AGENT_URL not set — external query route will return 503');
     }

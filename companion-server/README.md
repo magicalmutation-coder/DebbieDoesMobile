@@ -36,7 +36,14 @@ EMAIL_PASSWORD=your-app-password
 5. Copy the printed refresh token into `.env` as `SPOTIFY_REFRESH_TOKEN`
 
 ### Custom Agent
-Set `AGENT_URL` in `.env` to your agent's WebSocket endpoint.
+Set `AGENT_URL` in `.env` to either:
+
+- `ws://` or `wss://` endpoint (WebSocket bridge mode)
+- `http://` or `https://` base URL (external API forward mode)
+
+When using HTTP mode, the companion server forwards `/api/external/query`
+calls to `AGENT_URL + /api/external/query`.
+If auth is required, set `AGENT_EXTERNAL_API_KEY` (or rely on `EXTERNAL_API_KEY`).
 
 Your agent should emit JSON in this format:
 ```json

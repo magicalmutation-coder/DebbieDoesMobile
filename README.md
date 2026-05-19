@@ -172,7 +172,10 @@ See [External API handoff contract](docs/EXTERNAL_API_HANDOFF.md) for endpoint a
 Node bridge note: to let Debbie's on-device agent tool call Node `/api/external/query`, set:
 1. `EXTERNAL_API_KEY` in `companion-server/.env`
 2. `Companion Server URL` and `External API Key` in Debbie setup page (`http://192.168.4.1`)
-3. `AGENT_URL` in `companion-server/.env` if you want `/api/external/query` to forward into D3881E
+3. `AGENT_URL` in `companion-server/.env` if you want `/api/external/query` to forward into D3881E:
+   - `ws://` or `wss://` for WebSocket bridge mode
+   - `http://` or `https://` base URL for external API forwarding mode (for example `https://magic-nas-02.myqnapcloud.com`)
+4. Optional: set `AGENT_EXTERNAL_API_KEY` in `companion-server/.env` when HTTP forwarding target requires a different bearer key
 
 Share-pack note: the full handoff packet is available in [external-api-handoff](external-api-handoff/README.md) and can be shared as-is with partner projects.
 
@@ -201,6 +204,8 @@ Settings storage note: configuration is persisted in internal ESP32 NVS flash (n
 | `speaker_volume` | Speaker volume 0–100 | 75 |
 
 Local provider note: `local_llm_url` is normalized on save (trims whitespace/trailing slash and collapses accidental duplicate dots) to avoid malformed host strings breaking realtime connection.
+
+Node query note: Debbie tool `node_agent_query` calls companion `/api/external/query` using `companion_url`; if that is empty, it falls back to `agent_ws_url`. URL inputs are normalized to trim trailing slashes and strip a trailing `/login` suffix.
 
 Model probe note: `GET /llm_models?provider=openai` uses the configured OpenAI API key and fetches model IDs directly from OpenAI so you can verify cloud connectivity from the device. Error responses now include upstream detail (for example invalid/unauthorized key) to make setup troubleshooting faster.
 

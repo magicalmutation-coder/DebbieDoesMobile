@@ -144,7 +144,9 @@ static bool build_companion_http_url(char *out, size_t out_sz, const char *path)
     if (!out || out_sz == 0 || !path || !path[0]) return false;
     out[0] = '\0';
 
-    const char *base = g_debbie_config.companion_url;
+    const char *base = g_debbie_config.companion_url[0]
+        ? g_debbie_config.companion_url
+        : g_debbie_config.agent_ws_url;
     if (!base || !base[0]) return false;
 
     size_t pos = 0;
@@ -172,6 +174,14 @@ static bool build_companion_http_url(char *out, size_t out_sz, const char *path)
         out[--pos] = '\0';
     }
 
+    if (pos >= 6 && strcmp(out + pos - 6, "/login") == 0) {
+        pos -= 6;
+        out[pos] = '\0';
+        while (pos > 0 && out[pos - 1] == '/') {
+            out[--pos] = '\0';
+        }
+    }
+
     for (size_t i = 0; path[i] != '\0'; ++i) {
         if (pos + 1 >= out_sz) return false;
         out[pos++] = path[i];
@@ -185,8 +195,8 @@ static char *self_agent_node_query(const char *text, const char *session_id)
     if (!text || !text[0]) {
         return strdup("{\"ok\":false,\"error\":\"text required\"}");
     }
-    if (!g_debbie_config.companion_url[0]) {
-        return strdup("{\"ok\":false,\"error\":\"companion_url not configured\"}");
+    if (!g_debbie_config.companion_url[0] && !g_debbie_config.agent_ws_url[0]) {
+        return strdup("{\"ok\":false,\"error\":\"companion_url or agent_ws_url not configured\"}");
     }
     if (!g_debbie_config.companion_external_api_key[0]) {
         return strdup("{\"ok\":false,\"error\":\"external API key missing\"}");
