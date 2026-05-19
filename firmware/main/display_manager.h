@@ -37,7 +37,7 @@ void display_manager_show_camera_frame(const uint8_t *rgb565);
 void display_manager_set_notif_count(int count);
 
 /**
- * @brief  Update the Spotify "now playing" info on screen.
+ * @brief  Legacy API kept for compatibility; Spotify footer visuals are disabled.
  */
 void display_manager_set_spotify_track(const char *artist, const char *title,
                                        bool is_playing);

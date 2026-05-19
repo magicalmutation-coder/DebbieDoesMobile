@@ -25,6 +25,7 @@ Debbie is a full-featured personal AI companion that lives on the Freenove Media
 ```
 
 The UI now focuses on practical status and text output: WiFi/AI state, notifications, and setup/network diagnostics.
+Bottom footer is network diagnostics only (AP/STA/AI); Spotify now-playing strip is removed from runtime UI.
 
 ---
 

@@ -45,6 +45,8 @@ Behavior note:
 Behavior note:
 - Backlight GPIO is held high after display init to prevent runtime pin-mode interference.
 - When `DEBBIE_USE_ADC_NAV_LADDER=1`, LVGL keypad GPIO registration is skipped so GPIO19 ladder decoding in `main.c` is the only input path.
+- Bottom footer now shows network diagnostics only (AP/STA/AI). Spotify now-playing footer visuals were removed.
+- `display_manager_set_spotify_track` is retained as a compatibility no-op.
 
 ## Audio
 

@@ -9,8 +9,8 @@
  *  │   Debbie avatar    │   Chat / notification  │
  *  │    (animated)      │        panel           │
  *  │                    │                        │
- *  ├────────────────────┴────────────────────────┤
- *  │  🎵  Artist — Song title         [▶ || ⏭]  │  ← Spotify bar (36 px)
+ *  ├─────────────────────────────────────────────┤
+ *  │  AP/STA/AI network diagnostics             │  ← footer bar (36 px)
  *  └─────────────────────────────────────────────┘
  *
  * For the 1.14" (240×135) version the avatar fills the screen with a
@@ -102,7 +102,7 @@ static lv_obj_t *s_chat_label   = NULL;
 static lv_obj_t *s_notif_cont   = NULL;
 static lv_obj_t *s_notif_label  = NULL;
 
-/* Spotify bar */
+/* Footer diagnostics bar */
 static lv_obj_t *s_spotify_bar  = NULL;
 static lv_obj_t *s_spotify_lbl  = NULL;
 static lv_obj_t *s_netinfo_lbl  = NULL;
@@ -406,7 +406,7 @@ static void build_ui(void)
     lv_obj_set_style_text_color(s_lbl_notif, CLR_TEXT_SECONDARY, 0);
     lv_obj_align(s_lbl_notif, LV_ALIGN_RIGHT_MID, -4, 0);
 
-    int content_h = LCD_HEIGHT - 32 - 36;  /* minus status + spotify bars */
+    int content_h = LCD_HEIGHT - 32 - 36;  /* minus status + footer bar */
 
     /* ── Main content panel (full width, no avatar face) ── */
     s_chat_cont = lv_obj_create(screen);
@@ -428,13 +428,13 @@ static void build_ui(void)
     lv_label_set_text(s_chat_label,
         "Hi! I'm Debbie 😊\n"
         "I can chat, read your\n"
-        "messages, and control music.\n\n"
+        "messages, and help you.\n\n"
         "Use voice, or open setup at\n"
         "http://192.168.4.1");
     lv_obj_set_style_text_color(s_chat_label, CLR_TEXT_PRIMARY, 0);
     lv_obj_align(s_chat_label, LV_ALIGN_TOP_LEFT, 0, 22);
 
-    /* Spotify bar */
+    /* Bottom footer bar (network diagnostics only) */
     s_spotify_bar = lv_obj_create(screen);
     lv_obj_set_size(s_spotify_bar, LCD_WIDTH, 36);
     lv_obj_align(s_spotify_bar, LV_ALIGN_BOTTOM_LEFT, 0, 0);
@@ -444,17 +444,14 @@ static void build_ui(void)
     lv_obj_set_style_pad_all(s_spotify_bar, 4, 0);
     lv_obj_clear_flag(s_spotify_bar, LV_OBJ_FLAG_SCROLLABLE);
 
-    s_spotify_lbl = lv_label_create(s_spotify_bar);
-    lv_label_set_text(s_spotify_lbl, LV_SYMBOL_AUDIO "  Not connected to Spotify");
-    lv_obj_set_style_text_color(s_spotify_lbl, lv_color_hex(0x888888), 0);
-    lv_obj_align(s_spotify_lbl, LV_ALIGN_LEFT_MID, 4, 0);
+    s_spotify_lbl = NULL; /* Spotify footer label removed */
 
     s_netinfo_lbl = lv_label_create(s_spotify_bar);
     lv_label_set_text(s_netinfo_lbl, "AP: http://192.168.4.1  STA: --  AI: --");
     lv_label_set_long_mode(s_netinfo_lbl, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(s_netinfo_lbl, CLR_TEXT_SECONDARY, 0);
-    lv_obj_set_width(s_netinfo_lbl, LCD_WIDTH / 2);
-    lv_obj_align(s_netinfo_lbl, LV_ALIGN_RIGHT_MID, -4, 0);
+    lv_obj_set_width(s_netinfo_lbl, LCD_WIDTH - 8);
+    lv_obj_align(s_netinfo_lbl, LV_ALIGN_LEFT_MID, 4, 0);
     ESP_LOGI(TAG, "UI built — LCD %dx%d", LCD_WIDTH, LCD_HEIGHT);
 }
 
@@ -1026,7 +1023,7 @@ static void set_face_for_state(debbie_state_t state)
         break;
     case DEBBIE_STATE_SPOTIFY:
         bg          = CLR_BG_IDLE;
-        status_text = "Music 🎵";
+        status_text = "Ready! 😊";
         mouth_start = 200; mouth_end = 340;
         break;
     case DEBBIE_STATE_SETUP:
@@ -1082,7 +1079,7 @@ void display_manager_show_notification(const debbie_notification_t *notif)
     switch (notif->type) {
     case NOTIF_TYPE_WHATSAPP: icon = "💬"; break;
     case NOTIF_TYPE_EMAIL:    icon = "📧"; break;
-    case NOTIF_TYPE_SPOTIFY:  icon = "🎵"; break;
+    case NOTIF_TYPE_SPOTIFY:  icon = "🔔"; break;
     default:                  icon = "🔔"; break;
     }
     char buf[220];
@@ -1138,15 +1135,10 @@ void display_manager_set_notif_count(int count)
 void display_manager_set_spotify_track(const char *artist, const char *title,
                                        bool is_playing)
 {
-    if (!s_spotify_lbl) return;
-    char buf[128];
-    snprintf(buf, sizeof(buf), "%s %s — %s",
-             is_playing ? "▶" : "⏸", artist ? artist : "", title ? title : "");
-    if (xSemaphoreTake(s_lvgl_mux, pdMS_TO_TICKS(50))) {
-        lv_label_set_text(s_spotify_lbl, buf);
-        lv_obj_set_style_text_color(s_spotify_lbl, CLR_SPOTIFY, 0);
-        xSemaphoreGive(s_lvgl_mux);
-    }
+    (void)artist;
+    (void)title;
+    (void)is_playing;
+    /* Spotify footer visuals are intentionally removed; keep API for compatibility. */
 }
 
 void display_manager_set_battery(uint8_t percent)
