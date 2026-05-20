@@ -13,10 +13,10 @@ Debbie is a full-featured personal AI companion that lives on the Freenove Media
 │  📶 OK  🤖 AI  ║  ✨ Debbie  ║  🔋 85%  🔔 3           │  ← status bar
 ├──────────────────────────┬──────────────────────────────┤
 │                          │                              │
-│       ╭────────╮         │  💬 Hi! I'm Debbie 😊        │
-│      ( ◉    ◉ )         │                              │
-│      (    ‿    )        │  I can chat, see what my     │
-│       ╰────────╯         │  network looks like, read     │
+│  🚶 Vault Boy GIF loop   │  💬 Hi! I'm Debbie 😊        │
+│  (top-right mascot)      │                              │
+│  state-aware walk pace   │  I can chat, see what my     │
+│  + subtle motion bob     │  network looks like, read     │
 │                          │  your messages, and help you. │
 │       Ready! 😊          │                              │
 │                          │  Press centre button or      │
@@ -26,6 +26,7 @@ Debbie is a full-featured personal AI companion that lives on the Freenove Media
 
 The UI now focuses on practical status and text output: WiFi/AI state, notifications, and setup/network diagnostics.
 Bottom footer is network diagnostics only (AP/STA/AI); Spotify now-playing strip is removed from runtime UI.
+Top-right mascot now renders an embedded animated GIF (Vault Boy style) instead of text/ASCII frames.
 
 ---
 
@@ -46,6 +47,7 @@ Bottom footer is network diagnostics only (AP/STA/AI); Spotify now-playing strip
 | ⚙️ **Captive-Portal Setup** | First-run web UI at `192.168.4.1` for easy configuration |
 | 🔋 **Battery Monitor** | Battery percentage shown in status bar |
 | 🌈 **Practical LVGL UI** | Full-width status/text layout with connection indicators and diagnostics |
+| 🚶 **Walking Mascot** | Top-right mascot now uses an embedded Vault Boy GIF animation, with runtime-state cadence and motion updates |
 | 🎙️ **Speech-ready Boot** | When AI connects, Debbie enters listening-ready mode automatically so speech-to-text starts without extra setup |
 | 🧭 **On-device Launcher Menu** | Three-button navigation for network route help, hotspot setup, scanner, and notifications |
 | 🔄 **Auto-reconnect** | Automatically reconnects to WiFi and AI if connection drops |
@@ -175,16 +177,21 @@ The server runs on port 3001 by default. Enter its URL in Debbie's setup page:
 `ws://YOUR_PC_IP:3001`
 
 External HTTP integration note: companion projects consuming `/api/external/*`
-should send `Authorization: Bearer YOUR_EXTERNAL_API_KEY` on every call.
+should send `Authorization: Bearer YOUR_EXTERNAL_API_KEY` when companion auth is enabled.
+If `EXTERNAL_API_KEY` is not configured on companion, external routes are open.
+Canonical remote endpoint is `https://magic-nas-02.myqnapcloud.com` on port 443.
+Port 80 (`http://magic-nas-02.myqnapcloud.com`) is redirect/cutover.
+Port 3000 is internal-only transport and should not be used by remote partner integrations.
 See [External API handoff contract](docs/EXTERNAL_API_HANDOFF.md) for endpoint and error contracts.
 
 Node bridge note: to let Debbie's on-device agent tool call Node `/api/external/query`, set:
-1. `EXTERNAL_API_KEY` in `companion-server/.env`
-2. `Companion Server URL` and `External API Key` in Debbie setup page (`http://192.168.4.1`)
-3. `AGENT_URL` in `companion-server/.env` if you want `/api/external/query` to forward into D3881E:
+1. `Companion Server URL` in Debbie setup page (`http://192.168.4.1`)
+2. Optional: set `EXTERNAL_API_KEY` in `companion-server/.env` to enforce bearer auth on `/api/external/*`
+3. Optional: set `External API Key` in Debbie setup page to match companion key when auth is enabled
+4. `AGENT_URL` in `companion-server/.env` if you want `/api/external/query` to forward into D3881E:
    - `ws://` or `wss://` for WebSocket bridge mode
-   - `http://` or `https://` base URL for external API forwarding mode (for example `https://magic-nas-02.myqnapcloud.com`)
-4. Optional: set `AGENT_EXTERNAL_API_KEY` in `companion-server/.env` when HTTP forwarding target requires a different bearer key
+   - `http://` or `https://` base URL for external API forwarding mode (recommended: `https://magic-nas-02.myqnapcloud.com`; avoid `:3000` unless on trusted local network)
+5. Optional: set `AGENT_EXTERNAL_API_KEY` in `companion-server/.env` when HTTP forwarding target requires a different bearer key
 
 Share-pack note: the full handoff packet is available in [external-api-handoff](external-api-handoff/README.md) and can be shared as-is with partner projects.
 
@@ -207,14 +214,14 @@ Settings storage note: configuration is persisted in internal ESP32 NVS flash (n
 | `openai_api_key` | OpenAI API key (sk-...) | — |
 | `agent_ws_url` | Custom agent WebSocket URL | — |
 | `companion_url` | Companion server WebSocket URL | — |
-| `companion_external_api_key` | Bearer token Debbie uses for companion `/api/external/*` routes | — |
+| `companion_external_api_key` | Optional bearer token Debbie sends for companion `/api/external/*` routes | — |
 | `debbie_name` | Name shown on screen | Debbie |
 | `system_prompt` | Debbie's persona prompt | friendly AI companion |
 | `speaker_volume` | Speaker volume 0–100 | 75 |
 
 Local provider note: `local_llm_url` is normalized on save (trims whitespace/trailing slash and collapses accidental duplicate dots) to avoid malformed host strings breaking realtime connection.
 
-Node query note: Debbie tool `node_agent_query` calls companion `/api/external/query` using `companion_url`; if that is empty, it falls back to `agent_ws_url`. URL inputs are normalized to trim trailing slashes and strip a trailing `/login` suffix.
+Node query note: Debbie tool `node_agent_query` calls companion `/api/external/query` using `companion_url`; if that is empty, it falls back to `agent_ws_url`. URL inputs are normalized to trim trailing slashes and strip a trailing `/login` suffix. `companion_external_api_key` is optional and only sent when populated.
 
 Model probe note: `GET /llm_models?provider=openai` uses the configured OpenAI API key and fetches model IDs directly from OpenAI so you can verify cloud connectivity from the device. Error responses now include upstream detail (for example invalid/unauthorized key) to make setup troubleshooting faster.
 

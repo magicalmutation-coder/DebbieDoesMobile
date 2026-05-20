@@ -52,6 +52,8 @@ Behavior note:
 - When `DEBBIE_USE_ADC_NAV_LADDER=1`, LVGL keypad GPIO registration is skipped so GPIO19 ladder decoding in `main.c` is the only input path.
 - Bottom footer now shows network diagnostics only (AP/STA/AI). Spotify now-playing footer visuals were removed.
 - `display_manager_set_spotify_track` is retained as a compatibility no-op.
+- UI now includes a top-right GIF mascot (`assets/vaultboy.gif.h`) rendered by LVGL GIF decoder support.
+- `set_face_for_state` now updates mascot motion cadence and GIF playback state (pause/resume/restart) from Debbie runtime state transitions.
 
 ## Audio
 
@@ -147,7 +149,8 @@ Behavior note:
 
 Behavior note:
 - Spotify command plumbing remains in the API for compatibility, but runtime Spotify controls are currently gated off.
-- External HTTP integrations should use `Authorization: Bearer <external_api_key>` for `/api/external/*` routes; handoff details are documented in `docs/EXTERNAL_API_HANDOFF.md`.
+- External HTTP integrations can run in open mode when companion has no `EXTERNAL_API_KEY`; when a key is configured, clients should use `Authorization: Bearer <external_api_key>` for `/api/external/*` routes.
+- Canonical remote base URL for `/api/external/*` is `https://magic-nas-02.myqnapcloud.com` (port 443), with `http://magic-nas-02.myqnapcloud.com` on port 80 for redirect/cutover; port 3000 is internal-only transport.
 - Companion server external API now includes `/api/external/health`, `/api/external/events`, `/api/external/query`, `/api/external/whatsapp/status`, plus `/api/external/key/{status,rotate}`.
 - Companion `/api/external/query` now supports AGENT_URL in two modes: WebSocket bridge (`ws://` / `wss://`) and HTTP forwarding (`http://` / `https://` to downstream `/api/external/query`).
 
@@ -173,7 +176,7 @@ Behavior note:
 - Bluetooth controls remain visible in setup, but profiles built with `DEBBIE_ENABLE_BLE_RUNTIME=0` lock BLE enablement off and show guidance that Bluetooth speaker audio output is unsupported on this ESP32-S3 path.
 - The Network tab now shows a small "BLE runtime off" badge when BLE runtime is compiled out on this profile.
 - `/status` now includes `local_llm_model`, and `/configure` normalizes `local_llm_url` plus preserves local model selection separately from cloud-provider model fields.
-- `/configure` now accepts `ext_api_key` for companion external API bearer auth and sanitizes optional pasted `Bearer ` prefix.
+- `/configure` now accepts optional `ext_api_key` for companion external API bearer auth and sanitizes optional pasted `Bearer ` prefix.
 - `/configure` now sanitizes `openai_api_key` input (trims whitespace, strips accidental `Bearer ` prefixes, and truncates pasted trailing text).
 - `/llm_models?provider=openai` performs an HTTPS request to OpenAI `/v1/models` using the configured `openai_api_key` and returns richer upstream failure detail for auth/setup troubleshooting.
 - Spotify notification controls are hidden in setup UI while runtime Spotify support remains disabled.
@@ -234,5 +237,5 @@ Behavior note:
 - AGENT_TOOLS_JSON (exported tool schema string)
 
 Behavior note:
-- Tool schema now includes `node_agent_query`, allowing Debbie to POST text/session payloads to companion `/api/external/query` with configured bearer auth.
+- Tool schema now includes `node_agent_query`, allowing Debbie to POST text/session payloads to companion `/api/external/query` with optional bearer auth.
 - `node_agent_query` URL build now prefers `companion_url` and falls back to `agent_ws_url` when companion URL is not set, converting ws/wss schemes to http/https and trimming trailing `/login` when present.

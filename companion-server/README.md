@@ -44,6 +44,9 @@ Set `AGENT_URL` in `.env` to either:
 When using HTTP mode, the companion server forwards `/api/external/query`
 calls to `AGENT_URL + /api/external/query`.
 If auth is required, set `AGENT_EXTERNAL_API_KEY` (or rely on `EXTERNAL_API_KEY`).
+For remote integrations, prefer `https://magic-nas-02.myqnapcloud.com` (port 443).
+Use `http://magic-nas-02.myqnapcloud.com` on port 80 only for redirect/cutover.
+Avoid targeting `:3000` except on trusted local/internal network paths.
 
 Your agent should emit JSON in this format:
 ```json
@@ -62,14 +65,25 @@ Your agent should emit JSON in this format:
 
 These endpoints are intended for partner projects and remote integrations.
 
-Authentication for all `/api/external/*` routes:
+Authentication mode for `/api/external/*` routes:
+
+- If `EXTERNAL_API_KEY` is configured: auth is required.
+- If `EXTERNAL_API_KEY` is empty: auth is disabled (trusted/open mode).
+
+When auth is enabled, accepted formats are:
 
 - Preferred: `Authorization: Bearer YOUR_EXTERNAL_API_KEY`
 - Also accepted: `x-api-key`, `x-debbie-key`, or `?key=`
 
 Configured by `.env`:
 
-- `EXTERNAL_API_KEY` (required for external routes)
+- `EXTERNAL_API_KEY` (optional; enables auth when set)
+
+Public ingress guidance:
+
+- Canonical external base URL: `https://magic-nas-02.myqnapcloud.com`
+- Port 80 base URL for redirect/cutover: `http://magic-nas-02.myqnapcloud.com`
+- Port 3000 is internal-only transport and should not be used by remote partner clients
 
 Endpoints:
 
