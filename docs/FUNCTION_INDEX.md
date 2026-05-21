@@ -150,7 +150,7 @@ Behavior note:
 Behavior note:
 - Spotify command plumbing remains in the API for compatibility, but runtime Spotify controls are currently gated off.
 - External HTTP integrations can run in open mode when companion has no `EXTERNAL_API_KEY`; when a key is configured, clients should use `Authorization: Bearer <external_api_key>` for `/api/external/*` routes.
-- Canonical remote base URL for `/api/external/*` is `https://magic-nas-02.myqnapcloud.com` (port 443), with `http://magic-nas-02.myqnapcloud.com` on port 80 for redirect/cutover; port 3000 is internal-only transport.
+- Canonical remote base URL for `/api/external/*` is `https://adv.glyndavies.co.uk` (port 443), with `http://adv.glyndavies.co.uk` on port 80 for redirect/cutover; port 3000 is internal-only transport.
 - Companion server external API now includes `/api/external/health`, `/api/external/events`, `/api/external/query`, `/api/external/whatsapp/status`, plus `/api/external/key/{status,rotate}`.
 - Companion `/api/external/query` now supports AGENT_URL in two modes: WebSocket bridge (`ws://` / `wss://`) and HTTP forwarding (`http://` / `https://` to downstream `/api/external/query`).
 

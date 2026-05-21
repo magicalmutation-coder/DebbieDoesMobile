@@ -18,8 +18,8 @@ Share this whole folder with partner projects.
 
 ## Notes
 
-- Canonical partner endpoint: https://magic-nas-02.myqnapcloud.com (port 443).
-- HTTP on port 80 is for redirect/cutover: http://magic-nas-02.myqnapcloud.com.
+- Canonical partner endpoint: https://adv.glyndavies.co.uk (port 443).
+- HTTP on port 80 is for redirect/cutover: http://adv.glyndavies.co.uk.
 - Do not target :3000 from remote partner integrations; :3000 is internal transport only.
 - Use Authorization: Bearer YOUR_EXTERNAL_API_KEY for /api/external/* when companion auth is enabled.
 - sessionCookie is only required for key status/rotate endpoints.

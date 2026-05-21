@@ -44,8 +44,8 @@ Set `AGENT_URL` in `.env` to either:
 When using HTTP mode, the companion server forwards `/api/external/query`
 calls to `AGENT_URL + /api/external/query`.
 If auth is required, set `AGENT_EXTERNAL_API_KEY` (or rely on `EXTERNAL_API_KEY`).
-For remote integrations, prefer `https://magic-nas-02.myqnapcloud.com` (port 443).
-Use `http://magic-nas-02.myqnapcloud.com` on port 80 only for redirect/cutover.
+For remote integrations, prefer `https://adv.glyndavies.co.uk` (port 443).
+Use `http://adv.glyndavies.co.uk` on port 80 only for redirect/cutover.
 Avoid targeting `:3000` except on trusted local/internal network paths.
 
 Your agent should emit JSON in this format:
@@ -81,8 +81,8 @@ Configured by `.env`:
 
 Public ingress guidance:
 
-- Canonical external base URL: `https://magic-nas-02.myqnapcloud.com`
-- Port 80 base URL for redirect/cutover: `http://magic-nas-02.myqnapcloud.com`
+- Canonical external base URL: `https://adv.glyndavies.co.uk`
+- Port 80 base URL for redirect/cutover: `http://adv.glyndavies.co.uk`
 - Port 3000 is internal-only transport and should not be used by remote partner clients
 
 Endpoints:

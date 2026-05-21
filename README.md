@@ -179,8 +179,8 @@ The server runs on port 3001 by default. Enter its URL in Debbie's setup page:
 External HTTP integration note: companion projects consuming `/api/external/*`
 should send `Authorization: Bearer YOUR_EXTERNAL_API_KEY` when companion auth is enabled.
 If `EXTERNAL_API_KEY` is not configured on companion, external routes are open.
-Canonical remote endpoint is `https://magic-nas-02.myqnapcloud.com` on port 443.
-Port 80 (`http://magic-nas-02.myqnapcloud.com`) is redirect/cutover.
+Canonical remote endpoint is `https://adv.glyndavies.co.uk` on port 443.
+Port 80 (`http://adv.glyndavies.co.uk`) is redirect/cutover.
 Port 3000 is internal-only transport and should not be used by remote partner integrations.
 See [External API handoff contract](docs/EXTERNAL_API_HANDOFF.md) for endpoint and error contracts.
 
@@ -190,7 +190,7 @@ Node bridge note: to let Debbie's on-device agent tool call Node `/api/external/
 3. Optional: set `External API Key` in Debbie setup page to match companion key when auth is enabled
 4. `AGENT_URL` in `companion-server/.env` if you want `/api/external/query` to forward into D3881E:
    - `ws://` or `wss://` for WebSocket bridge mode
-   - `http://` or `https://` base URL for external API forwarding mode (recommended: `https://magic-nas-02.myqnapcloud.com`; avoid `:3000` unless on trusted local network)
+   - `http://` or `https://` base URL for external API forwarding mode (recommended: `https://adv.glyndavies.co.uk`; avoid `:3000` unless on trusted local network)
 5. Optional: set `AGENT_EXTERNAL_API_KEY` in `companion-server/.env` when HTTP forwarding target requires a different bearer key
 
 Share-pack note: the full handoff packet is available in [external-api-handoff](external-api-handoff/README.md) and can be shared as-is with partner projects.

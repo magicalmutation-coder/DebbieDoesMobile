@@ -6,10 +6,10 @@ This document is the integration contract for external clients that need to call
 
 Use the DebbieBot public ingress, then append the external base path.
 
-- Canonical HTTPS base (port 443): https://magic-nas-02.myqnapcloud.com
-- HTTP base (port 80, redirect/cutover): http://magic-nas-02.myqnapcloud.com
+- Canonical HTTPS base (port 443): https://adv.glyndavies.co.uk
+- HTTP base (port 80, redirect/cutover): http://adv.glyndavies.co.uk
 - Base path: /api/external
-- Example: https://magic-nas-02.myqnapcloud.com/api/external
+- Example: https://adv.glyndavies.co.uk/api/external
 - Port 3000 is internal transport and should not be used by remote partner integrations.
 
 ## 2. Authentication (Conditional)
@@ -37,7 +37,7 @@ Recommended for all new authenticated integrations: use Authorization Bearer onl
 
 - Method: GET
 - Path: /health
-- Full URL example: https://magic-nas-02.myqnapcloud.com/api/external/health
+- Full URL example: https://adv.glyndavies.co.uk/api/external/health
 - Purpose: quick liveness and runtime uptime check
 
 Typical response fields:
@@ -51,7 +51,7 @@ Typical response fields:
 
 - Method: GET
 - Path: /events
-- Full URL example: https://magic-nas-02.myqnapcloud.com/api/external/events
+- Full URL example: https://adv.glyndavies.co.uk/api/external/events
 - Query params:
   - since: unix epoch milliseconds (optional)
   - limit: number of events, max 200 (optional)
@@ -78,7 +78,7 @@ Event topics commonly include:
 
 - Method: POST
 - Path: /query
-- Full URL example: https://magic-nas-02.myqnapcloud.com/api/external/query
+- Full URL example: https://adv.glyndavies.co.uk/api/external/query
 - Content-Type: application/json
 
 Request body:
@@ -105,7 +105,7 @@ Typical response fields:
 
 - Method: GET
 - Path: /whatsapp/status
-- Full URL example: https://magic-nas-02.myqnapcloud.com/api/external/whatsapp/status
+- Full URL example: https://adv.glyndavies.co.uk/api/external/whatsapp/status
 - Purpose: read current WhatsApp bridge state
 
 ## 4. API Key Management (Debbie Web Session Auth)
@@ -132,26 +132,26 @@ Operational flow:
 
 ### 6.1 Health Check
 
-curl https://magic-nas-02.myqnapcloud.com/api/external/health
+curl https://adv.glyndavies.co.uk/api/external/health
 
 If auth is enabled:
 
-curl -H "Authorization: Bearer YOUR_EXTERNAL_API_KEY" https://magic-nas-02.myqnapcloud.com/api/external/health
+curl -H "Authorization: Bearer YOUR_EXTERNAL_API_KEY" https://adv.glyndavies.co.uk/api/external/health
 
 ### 6.2 Event Poll
 
-curl "https://magic-nas-02.myqnapcloud.com/api/external/events?limit=50&topics=mail,whatsapp"
+curl "https://adv.glyndavies.co.uk/api/external/events?limit=50&topics=mail,whatsapp"
 
 If auth is enabled:
 
-curl -H "Authorization: Bearer YOUR_EXTERNAL_API_KEY" "https://magic-nas-02.myqnapcloud.com/api/external/events?limit=50&topics=mail,whatsapp"
+curl -H "Authorization: Bearer YOUR_EXTERNAL_API_KEY" "https://adv.glyndavies.co.uk/api/external/events?limit=50&topics=mail,whatsapp"
 
 ### 6.3 Agent Query
 
 curl -X POST \
   -H "Content-Type: application/json" \
   -d '{"text":"Ping from remote agent"}' \
-  https://magic-nas-02.myqnapcloud.com/api/external/query
+  https://adv.glyndavies.co.uk/api/external/query
 
 If auth is enabled:
 
@@ -159,7 +159,7 @@ curl -X POST \
   -H "Authorization: Bearer YOUR_EXTERNAL_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"text":"Ping from remote agent"}' \
-  https://magic-nas-02.myqnapcloud.com/api/external/query
+  https://adv.glyndavies.co.uk/api/external/query
 
 ## 7. Security Guidance for Integrators
 
